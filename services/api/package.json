@@ -1,0 +1,24 @@
+{
+  "name": "@kicks/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/start.ts",
+    "start": "tsx src/start.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test src/*.test.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.0.0",
+    "fastify": "^5.4.0",
+    "pg": "^8.23.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.19.0",
+    "typescript": "~5.8.3"
+  }
+}

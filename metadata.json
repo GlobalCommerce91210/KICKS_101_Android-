@@ -1,0 +1,8 @@
+{
+  "name": "KICK'S",
+  "description": "Privacy and data-value command center turning hidden app connections into understandable privacy choices and compensated opportunities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

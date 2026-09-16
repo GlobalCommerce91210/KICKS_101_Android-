@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "KICK’S",
+    "slug": "kicks-app",
+    "scheme": "kicks",
+    "version": "0.2.5",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "plugins": ["expo-router"],
+    "android": {
+      "package": "com.datastorm.kicks",
+      "adaptiveIcon": { "backgroundColor": "#081A18" }
+    },
+    "extra": { "trafficMode": "demo" }
+  }
+}
