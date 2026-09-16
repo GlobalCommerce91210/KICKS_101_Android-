@@ -13,6 +13,7 @@ jobs:
           node-version: 24
       - run: npm install
       - run: npm run typecheck
+      - run: npm run build
       - run: npm test
       - uses: actions/setup-java@v4
         with:
