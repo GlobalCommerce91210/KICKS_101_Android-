@@ -11,7 +11,8 @@ import java.util.UUID
 enum class UploadResult { ACCEPTED, REPLAY_CONFIRMED }
 
 object MetadataUploader {
-  fun metadata(config: CollectorConfig, hostname: String, app: AppAttribution): QueuedUpload {
+  fun metadata(config: CollectorConfig, activationId: String, hostname: String, app: AppAttribution): QueuedUpload {
+    require(activationId.matches(Regex("^[0-9a-fA-F-]{36}$"))) { "A valid activation identifier is required." }
     val eventId = UUID.randomUUID().toString()
     val batchId = UUID.randomUUID().toString()
     val occurredAt = Instant.now().toString()
@@ -38,7 +39,7 @@ object MetadataUploader {
       .put("protocol", "dns")
       .put("bytesBucket", "0-1KB")
       .put("classification", "unknown")
-      .put("consentId", config.consentId)
+      .put("consentId", activationId)
       .put("consentPurpose", config.purpose)
     val body = JSONObject().put("batchId", batchId).put("schemaVersion", "2026-09-01").put("observations", JSONArray().put(event)).toString()
     return QueuedUpload(batchId, "/v1/metadata-batches", body, "metadata", hostname, app.packageName, occurredAt)
