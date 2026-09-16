@@ -11,6 +11,15 @@ import { AppMetadataGates, IntelligenceEngine, MarketplaceMatchRequest, Telemetr
 import { WalletEngine } from './wallet.js';
 import { ComplianceEngine, type CompliancePolicy } from './compliance.js';
 import { BlogComplianceGateway } from './blog-compliance-gateway.js';
+import { MemoryConsumerIdentityStore, type ConsumerIdentityStore } from './consumer-identity.js';
+import { PostgresConsumerIdentityStore } from './consumer-identity-postgres.js';
+import {
+  MemoryConsumerDeviceBindingStore,
+  PostgresConsumerDeviceBindingStore,
+  type ConsumerDeviceBindingStore,
+} from './consumer-device-bindings.js';
+import { registerDataStormIdentityRoutes } from './datastorm-identity-routes.js';
+import { registerKicksConsumerRoutes } from './kicks-consumer-routes.js';
 import { KICKS_BRAND_MANIFEST } from './branding.js';
 import { AppPermission, BuyerPermission, MetadataPermission, PermissionsEngine } from './permissions.js';
 import {
@@ -151,6 +160,8 @@ export function buildServer(options: {
   permissionsEngine?: PermissionsEngine;
   complianceEngine?: ComplianceEngine;
   blogComplianceGateway?: BlogComplianceGateway;
+  consumerIdentityStore?: ConsumerIdentityStore;
+  consumerDeviceBindingStore?: ConsumerDeviceBindingStore;
 } = {}) {
   const databaseUrl = process.env.DATABASE_URL ?? process.env.KICKS_DATABASE_URL;
   const store = options.store ?? (databaseUrl
@@ -172,6 +183,12 @@ export function buildServer(options: {
   const walletEngine = options.walletEngine ?? new WalletEngine(engine, permissionsEngine);
   const complianceEngine = options.complianceEngine ?? new ComplianceEngine();
   const blogComplianceGateway = options.blogComplianceGateway ?? new BlogComplianceGateway(complianceEngine);
+  const identityStore = options.consumerIdentityStore ?? (databaseUrl
+    ? PostgresConsumerIdentityStore.fromConnectionString(databaseUrl)
+    : new MemoryConsumerIdentityStore());
+  const deviceBindingStore = options.consumerDeviceBindingStore ?? (databaseUrl
+    ? PostgresConsumerDeviceBindingStore.fromConnectionString(databaseUrl)
+    : new MemoryConsumerDeviceBindingStore());
   const app = Fastify({
     logger: { redact: [
       'req.headers.authorization',
@@ -190,13 +207,25 @@ export function buildServer(options: {
       .header('strict-transport-security', 'max-age=31536000');
     return payload;
   });
-  app.addHook('onClose', () => store.close());
+  app.addHook('onClose', async () => {
+    await Promise.all([store.close(), identityStore.close(), deviceBindingStore.close()]);
+  });
 
   app.get('/health', async () => ({
     status: 'ok', service: 'kicks-api', environment, collector: 'metadata-only',
     durability: store instanceof PostgresStore ? 'postgres' : 'memory',
     enginePolicyVersion: '1.0.0', configuredEngineMode: requestedEngineMode,
   }));
+
+  registerDataStormIdentityRoutes(app, identityStore);
+  registerKicksConsumerRoutes(app, {
+    identityStore,
+    deviceBindingStore,
+    store,
+    permissionsEngine,
+    walletEngine,
+    complianceEngine,
+  });
 
   const authenticateAdmin = (suppliedSecret: string) => Boolean(adminSecret)
     && safeEqual(hash(suppliedSecret), hash(adminSecret));
