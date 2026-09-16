@@ -80,7 +80,7 @@ export class IntelligenceEngine {
     const metadata_items:MetadataItem[]=keys.map(key=>{
       const type=metadataTypeForKey(key);
       const gate=gates.gates.find(item=>item.metadata_type===type);
-      return {key,type,description:`Minimized ${type} signal`,sample_value:'present',estimated_value_per_event:0,buyer_categories:[],consent_required:type!=='operational',consent_state:gate?.default_state??'conditional'};
+      return {key,type,description:`Minimized ${type} signal`,sample_value:null,estimated_value_per_event:0,buyer_categories:[],consent_required:type!=='operational',consent_state:gate?.default_state??'conditional'};
     });
     const eligible_for_marketplace=metadata_items.some(item=>item.consent_state==='allowed'&&item.type!=='operational')&&this.offers.length>0;
     const scores:ScoreSet={

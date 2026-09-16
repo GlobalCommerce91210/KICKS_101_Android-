@@ -170,7 +170,7 @@ export class WalletEngine {
     const earnings_by_metadata: Record<string, number> = {};
     const earnings_by_buyer: Record<string, number> = {};
     const earnings_by_persona: Record<string, number> = {};
-    const earnings_by_period: Record<string, number> = { today: 0, this_week: 0, this_month: 0 };
+    const earnings_by_period = { today: 0, this_week: 0, this_month: 0 };
     let totalApproved = 0;
     let totalPending = 0;
     let totalSettled = 0;
