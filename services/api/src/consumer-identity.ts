@@ -1,7 +1,8 @@
-﻿import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
+import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
 
 export type AccountStatus = 'pending_verification' | 'active' | 'suspended' | 'closed';
 export type ProductEntitlementStatus = 'active' | 'suspended' | 'revoked';
+export type IdentityTokenKind = 'email_verification' | 'password_reset' | 'mfa_challenge';
 
 export interface DataStormAccount {
   subject_id: string;
@@ -9,6 +10,7 @@ export interface DataStormAccount {
   password_hash: string;
   email_verified: boolean;
   account_status: AccountStatus;
+  mfa_enabled: boolean;
   region: string | null;
   marketing_opt_in: boolean;
   terms_version: string;
@@ -51,6 +53,17 @@ export interface ConsumerSession {
   created_at: string;
 }
 
+export interface ConsumerIdentityToken {
+  token_id: string;
+  subject_id: string;
+  kind: IdentityTokenKind;
+  token_hash: string;
+  expires_at: string;
+  consumed_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
 export interface CreateAccountInput {
   email: string;
   password: string;
@@ -87,7 +100,14 @@ export interface ConsumerIdentityStore {
   findSessionByAccessToken(token: string): Promise<ConsumerSession | null>;
   refreshSession(refreshToken: string): Promise<SessionBundle | null>;
   revokeSession(accessToken: string): Promise<boolean>;
+  revokeAllSessions(subjectId: string): Promise<void>;
+  issueSessionForSubject(subjectId: string): Promise<SessionBundle | null>;
+  issueIdentityToken(subjectId: string, kind: IdentityTokenKind, ttlMs: number): Promise<string | null>;
+  consumeIdentityToken(rawToken: string, kind: IdentityTokenKind): Promise<ConsumerIdentityToken | null>;
   verifyEmail(subjectId: string): Promise<DataStormAccount | null>;
+  updatePassword(subjectId: string, newPassword: string): Promise<boolean>;
+  setMfaEnabled(subjectId: string, enabled: boolean): Promise<boolean>;
+  closeAccount(subjectId: string): Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -118,6 +138,7 @@ export class MemoryConsumerIdentityStore implements ConsumerIdentityStore {
   private entitlements = new Map<string, ProductEntitlement>();
   private profiles = new Map<string, KicksConsumerProfile>();
   private sessions = new Map<string, ConsumerSession>();
+  private identityTokens = new Map<string, ConsumerIdentityToken>();
 
   async createAccount(input: CreateAccountInput): Promise<AccountBundle> {
     const email = normalizeEmail(input.email);
@@ -132,6 +153,7 @@ export class MemoryConsumerIdentityStore implements ConsumerIdentityStore {
       password_hash: hashPassword(input.password),
       email_verified: false,
       account_status: 'pending_verification',
+      mfa_enabled: false,
       region: input.region?.trim() || null,
       marketing_opt_in: input.marketing_opt_in === true,
       terms_version: input.terms_version,
@@ -208,6 +230,8 @@ export class MemoryConsumerIdentityStore implements ConsumerIdentityStore {
         !session.revoked_at &&
         Date.parse(session.access_expires_at) > now
       ) {
+        const account = this.accounts.get(session.subject_id);
+        if (!account || account.account_status === 'suspended' || account.account_status === 'closed') return null;
         return { ...session };
       }
     }
@@ -223,6 +247,11 @@ export class MemoryConsumerIdentityStore implements ConsumerIdentityStore {
         !session.revoked_at &&
         Date.parse(session.refresh_expires_at) > now
       ) {
+        const account = this.accounts.get(session.subject_id);
+        if (!account || account.account_status === 'suspended' || account.account_status === 'closed') {
+          session.revoked_at = new Date().toISOString();
+          return null;
+        }
         session.revoked_at = new Date().toISOString();
         return this.issueSession(session.subject_id);
       }
@@ -241,13 +270,118 @@ export class MemoryConsumerIdentityStore implements ConsumerIdentityStore {
     return false;
   }
 
+  async revokeAllSessions(subjectId: string): Promise<void> {
+    const now = new Date().toISOString();
+    for (const session of this.sessions.values()) {
+      if (session.subject_id === subjectId && !session.revoked_at) session.revoked_at = now;
+    }
+  }
+
+  async issueSessionForSubject(subjectId: string): Promise<SessionBundle | null> {
+    const account = this.accounts.get(subjectId);
+    if (!account || account.account_status === 'suspended' || account.account_status === 'closed') return null;
+    return this.issueSession(subjectId);
+  }
+
+  async issueIdentityToken(subjectId: string, kind: IdentityTokenKind, ttlMs: number): Promise<string | null> {
+    const account = this.accounts.get(subjectId);
+    if (!account || account.account_status === 'closed') return null;
+    const now = Date.now();
+    for (const token of this.identityTokens.values()) {
+      if (token.subject_id === subjectId && token.kind === kind && !token.consumed_at && !token.revoked_at) {
+        token.revoked_at = new Date(now).toISOString();
+      }
+    }
+    const raw = newToken();
+    const record: ConsumerIdentityToken = {
+      token_id: `idt_${randomUUID()}`,
+      subject_id: subjectId,
+      kind,
+      token_hash: sha256(raw),
+      expires_at: new Date(now + Math.max(1, ttlMs)).toISOString(),
+      consumed_at: null,
+      revoked_at: null,
+      created_at: new Date(now).toISOString(),
+    };
+    this.identityTokens.set(record.token_id, record);
+    return raw;
+  }
+
+  async consumeIdentityToken(rawToken: string, kind: IdentityTokenKind): Promise<ConsumerIdentityToken | null> {
+    const tokenHash = sha256(rawToken);
+    const now = Date.now();
+    for (const token of this.identityTokens.values()) {
+      if (
+        token.kind === kind &&
+        token.token_hash === tokenHash &&
+        !token.consumed_at &&
+        !token.revoked_at &&
+        Date.parse(token.expires_at) > now
+      ) {
+        const account = this.accounts.get(token.subject_id);
+        if (!account || account.account_status === 'closed') return null;
+        token.consumed_at = new Date(now).toISOString();
+        return { ...token };
+      }
+    }
+    return null;
+  }
+
   async verifyEmail(subjectId: string): Promise<DataStormAccount | null> {
     const account = this.accounts.get(subjectId);
-    if (!account) return null;
+    if (!account || account.account_status === 'closed') return null;
     account.email_verified = true;
     account.account_status = 'active';
     account.updated_at = new Date().toISOString();
     return { ...account, metadata: { ...account.metadata } };
+  }
+
+  async updatePassword(subjectId: string, newPassword: string): Promise<boolean> {
+    const account = this.accounts.get(subjectId);
+    if (!account || account.account_status === 'closed') return false;
+    account.password_hash = hashPassword(newPassword);
+    account.updated_at = new Date().toISOString();
+    await this.revokeAllSessions(subjectId);
+    return true;
+  }
+
+  async setMfaEnabled(subjectId: string, enabled: boolean): Promise<boolean> {
+    const account = this.accounts.get(subjectId);
+    if (!account || account.account_status === 'closed') return false;
+    account.mfa_enabled = enabled;
+    account.updated_at = new Date().toISOString();
+    return true;
+  }
+
+  async closeAccount(subjectId: string): Promise<boolean> {
+    const account = this.accounts.get(subjectId);
+    if (!account) return false;
+    const now = new Date().toISOString();
+    this.emailIndex.delete(account.email);
+    account.email = `deleted+${sha256(subjectId).slice(0, 24)}@invalid.local`;
+    account.password_hash = 'deleted';
+    account.email_verified = false;
+    account.account_status = 'closed';
+    account.mfa_enabled = false;
+    account.region = null;
+    account.marketing_opt_in = false;
+    account.metadata = {};
+    account.updated_at = now;
+    const entitlement = this.entitlements.get(subjectId);
+    if (entitlement) {
+      entitlement.status = 'revoked';
+      entitlement.updated_at = now;
+    }
+    const profile = this.profiles.get(subjectId);
+    if (profile) {
+      profile.status = 'suspended';
+      profile.updated_at = now;
+    }
+    await this.revokeAllSessions(subjectId);
+    for (const token of this.identityTokens.values()) {
+      if (token.subject_id === subjectId && !token.revoked_at) token.revoked_at = now;
+    }
+    return true;
   }
 
   private issueSession(subjectId: string): SessionBundle {

@@ -18,6 +18,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
+        env:
+          NODE_ENV: test
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
