@@ -7,6 +7,7 @@ import {
   type IdentityTokenKind,
   type SessionBundle,
 } from './consumer-identity.js';
+import { createAccountIdempotencyStore } from './identity-idempotency.js';
 
 const accountCreate = z.object({
   email: z.string().email().max(320),
@@ -73,10 +74,8 @@ export function registerDataStormIdentityRoutes(
   identityStore: ConsumerIdentityStore,
   notifyToken?: IdentityTokenNotifier,
 ) {
-  const idempotency = new Map<string, {
-    fingerprint: string;
-    response: Record<string, unknown>;
-  }>();
+  const idempotency = createAccountIdempotencyStore();
+  app.addHook('onClose', async () => idempotency.close());
 
   const deliver = async (subjectId: string, email: string, kind: IdentityTokenKind, ttlMs: number) => {
     const raw = await identityStore.issueIdentityToken(subjectId, kind, ttlMs);
@@ -85,6 +84,31 @@ export function registerDataStormIdentityRoutes(
   };
 
   const testToken = (raw: string | null) => process.env.NODE_ENV === 'test' && raw ? { debug_token: raw } : {};
+
+  const accountResponse = async (subjectId: string, verificationToken: string | null = null) => {
+    const [account, entitlement, profile] = await Promise.all([
+      identityStore.findAccountBySubjectId(subjectId),
+      identityStore.getKicksEntitlement(subjectId),
+      identityStore.getKicksProfile(subjectId),
+    ]);
+    if (!account || !entitlement || !profile) return null;
+    return {
+      account: publicAccount(account),
+      product_access: { kicks: entitlement },
+      kicks_profile: profile,
+      permissions: {
+        monitoring: 'not_authorized',
+        commercial_data: 'not_authorized',
+        marketplace: 'not_authorized',
+        compensated_opportunities: 'not_authorized',
+      },
+      email_verification: {
+        required: !account.email_verified,
+        delivery: 'email',
+        ...testToken(verificationToken),
+      },
+    };
+  };
 
   app.post('/core/identity/v1/account', async (request, reply) => {
     const parsed = accountCreate.safeParse(request.body);
@@ -98,35 +122,32 @@ export function registerDataStormIdentityRoutes(
     }
 
     const bodyFingerprint = fingerprint(parsed.data);
-    const prior = idempotency.get(idempotencyKey);
+    const prior = await idempotency.find(idempotencyKey);
     if (prior) {
       if (prior.fingerprint !== bodyFingerprint) {
         return reply.code(409).send({ error: 'idempotency_conflict', message: 'The Idempotency-Key was already used with a different request.', request_id: request.id });
       }
-      return reply.code(201).send(prior.response);
+      const response = await accountResponse(prior.subject_id);
+      if (!response) {
+        return reply.code(409).send({ error: 'idempotency_state_invalid', message: 'The prior account result is unavailable.', request_id: request.id });
+      }
+      return reply.code(201).send(response);
     }
 
     try {
       const bundle = await identityStore.createAccount(parsed.data);
       const verificationToken = await deliver(bundle.account.subject_id, bundle.account.email, 'email_verification', 24 * 60 * 60 * 1000);
-      const response = {
-        account: publicAccount(bundle.account),
-        product_access: { kicks: bundle.entitlement },
-        kicks_profile: bundle.profile,
-        permissions: {
-          monitoring: 'not_authorized',
-          commercial_data: 'not_authorized',
-          marketplace: 'not_authorized',
-          compensated_opportunities: 'not_authorized',
-        },
-        email_verification: { required: true, delivery: 'email', ...testToken(verificationToken) },
-      };
-      idempotency.set(idempotencyKey, { fingerprint: bodyFingerprint, response });
+      await idempotency.save(idempotencyKey, { fingerprint: bodyFingerprint, subject_id: bundle.account.subject_id });
+      const response = await accountResponse(bundle.account.subject_id, verificationToken);
+      if (!response) throw new Error('account_creation_failed');
       return reply.code(201).send(response);
     } catch (error) {
       const code = error instanceof Error ? error.message : 'account_creation_failed';
       if (code === 'account_exists') {
         return reply.code(409).send({ error: 'account_exists', message: 'An account already exists for this email address.', request_id: request.id });
+      }
+      if (code === 'idempotency_conflict') {
+        return reply.code(409).send({ error: 'idempotency_conflict', message: 'The Idempotency-Key conflicts with a prior request.', request_id: request.id });
       }
       request.log.error(error);
       return reply.code(500).send({ error: 'account_creation_failed', message: 'The account could not be created.', request_id: request.id });
