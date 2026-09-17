@@ -19,27 +19,27 @@ export class PermissionsEngine {
   public getAppPermissions(userId:string):AppPermission[]{return this.userApps.get(userId)??[]}
   public setAppPermissions(userId:string,apps:AppPermission[],context='permissions_dashboard'):AppPermission[]{
     const existingMap=new Map(this.getAppPermissions(userId).map(app=>[app.app_id,app]));const now=new Date().toISOString();
-    for(const incoming of apps){const prev=existingMap.get(incoming.app_id);const next={...incoming,last_updated:now};if(!prev||prev.state!==next.state)this.appendLog({log_id:`clog-${randomUUID().slice(0,8)}`,user_id:userId,app_id:next.app_id,previous_state:prev?.state??null,new_state:next.state,context,timestamp:now});existingMap.set(next.app_id,next)}
+    for(const incoming of apps){const prev=existingMap.get(incoming.app_id);const next={...incoming,last_updated:now};if(!prev||prev.state!==next.state)this.appendLog({log_id:`clog-${randomUUID().slice(0,8)}`,user_id:userId,app_id:next.app_id,previous_state:prev?.state??'blocked',new_state:next.state,context,timestamp:now});existingMap.set(next.app_id,next)}
     const updated=[...existingMap.values()];this.userApps.set(userId,updated);return updated;
   }
 
   public getMetadataPermissions(userId:string,appId:string):MetadataPermission[]{
     let appMap=this.userMetadata.get(userId);if(!appMap){appMap=new Map();this.userMetadata.set(userId,appMap)}
     let permissions=appMap.get(appId);if(!permissions){const now=new Date().toISOString();permissions=[
-      {metadata_type:'commercial',state:'conditional',buyer_overrides:[],last_updated:now},
-      {metadata_type:'transactional',state:'conditional',buyer_overrides:[],last_updated:now},
-      {metadata_type:'intent',state:'conditional',buyer_overrides:[],last_updated:now},
-      {metadata_type:'behavioral',state:'conditional',buyer_overrides:[],last_updated:now},
-      {metadata_type:'engagement',state:'conditional',buyer_overrides:[],last_updated:now},
-      {metadata_type:'device',state:'conditional',buyer_overrides:[],last_updated:now},
-      {metadata_type:'operational',state:'allowed',buyer_overrides:[],last_updated:now},
+      {metadata_type:'commercial',state:'blocked',buyer_overrides:[],last_updated:now},
+      {metadata_type:'transactional',state:'blocked',buyer_overrides:[],last_updated:now},
+      {metadata_type:'intent',state:'blocked',buyer_overrides:[],last_updated:now},
+      {metadata_type:'behavioral',state:'blocked',buyer_overrides:[],last_updated:now},
+      {metadata_type:'engagement',state:'blocked',buyer_overrides:[],last_updated:now},
+      {metadata_type:'device',state:'blocked',buyer_overrides:[],last_updated:now},
+      {metadata_type:'operational',state:'blocked',buyer_overrides:[],last_updated:now},
     ];appMap.set(appId,permissions)}
     return permissions;
   }
 
   public setMetadataPermissions(userId:string,appId:string,permissions:MetadataPermission[],context='metadata_inspector'):MetadataPermission[]{
     const existingMap=new Map(this.getMetadataPermissions(userId,appId).map(item=>[item.metadata_type,item]));const now=new Date().toISOString();
-    for(const incoming of permissions){const prev=existingMap.get(incoming.metadata_type);const next={...incoming,last_updated:now};if(!prev||prev.state!==next.state)this.appendLog({log_id:`clog-${randomUUID().slice(0,8)}`,user_id:userId,app_id:appId,metadata_type:next.metadata_type,previous_state:prev?.state??null,new_state:next.state,context,timestamp:now});existingMap.set(next.metadata_type,next)}
+    for(const incoming of permissions){const prev=existingMap.get(incoming.metadata_type);const next={...incoming,last_updated:now};if(!prev||prev.state!==next.state)this.appendLog({log_id:`clog-${randomUUID().slice(0,8)}`,user_id:userId,app_id:appId,metadata_type:next.metadata_type,previous_state:prev?.state??'blocked',new_state:next.state,context,timestamp:now});existingMap.set(next.metadata_type,next)}
     const updated=[...existingMap.values()];this.userMetadata.get(userId)?.set(appId,updated);
     this.intelligenceEngine?.updateGates(appId,{app_id:appId,gates:updated.map(item=>({metadata_type:item.metadata_type,default_state:item.state,buyer_overrides:item.buyer_overrides}))});
     return updated;
@@ -48,7 +48,7 @@ export class PermissionsEngine {
   public getBuyerPermissions(userId:string):BuyerPermission[]{return this.userBuyers.get(userId)??[]}
   public setBuyerPermissions(userId:string,buyers:BuyerPermission[],context='buyer_controls'):BuyerPermission[]{
     const existingMap=new Map(this.getBuyerPermissions(userId).map(item=>[item.buyer_category,item]));const now=new Date().toISOString();
-    for(const incoming of buyers){const prev=existingMap.get(incoming.buyer_category);const next={...incoming,last_updated:now};if(!prev||prev.state!==next.state)this.appendLog({log_id:`clog-${randomUUID().slice(0,8)}`,user_id:userId,buyer_category:next.buyer_category,previous_state:prev?.state??null,new_state:next.state,context,timestamp:now});existingMap.set(next.buyer_category,next)}
+    for(const incoming of buyers){const prev=existingMap.get(incoming.buyer_category);const next={...incoming,last_updated:now};if(!prev||prev.state!==next.state)this.appendLog({log_id:`clog-${randomUUID().slice(0,8)}`,user_id:userId,buyer_category:next.buyer_category,previous_state:prev?.state??'blocked',new_state:next.state,context,timestamp:now});existingMap.set(next.buyer_category,next)}
     const updated=[...existingMap.values()];this.userBuyers.set(userId,updated);return updated;
   }
 
