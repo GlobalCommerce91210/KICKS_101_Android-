@@ -37,13 +37,13 @@ export const INITIAL_MARKETPLACE_OFFERS: MarketplaceOffer[] = [];
 
 export function getDefaultGates(appId:string):AppMetadataGates {
   return { app_id:appId, gates:[
-    {metadata_type:'commercial',default_state:'conditional',buyer_overrides:[]},
-    {metadata_type:'transactional',default_state:'conditional',buyer_overrides:[]},
-    {metadata_type:'intent',default_state:'conditional',buyer_overrides:[]},
-    {metadata_type:'behavioral',default_state:'conditional',buyer_overrides:[]},
-    {metadata_type:'engagement',default_state:'conditional',buyer_overrides:[]},
-    {metadata_type:'device',default_state:'conditional',buyer_overrides:[]},
-    {metadata_type:'operational',default_state:'allowed',buyer_overrides:[]},
+    {metadata_type:'commercial',default_state:'blocked',buyer_overrides:[]},
+    {metadata_type:'transactional',default_state:'blocked',buyer_overrides:[]},
+    {metadata_type:'intent',default_state:'blocked',buyer_overrides:[]},
+    {metadata_type:'behavioral',default_state:'blocked',buyer_overrides:[]},
+    {metadata_type:'engagement',default_state:'blocked',buyer_overrides:[]},
+    {metadata_type:'device',default_state:'blocked',buyer_overrides:[]},
+    {metadata_type:'operational',default_state:'blocked',buyer_overrides:[]},
   ]};
 }
 
@@ -80,7 +80,7 @@ export class IntelligenceEngine {
     const metadata_items:MetadataItem[]=keys.map(key=>{
       const type=metadataTypeForKey(key);
       const gate=gates.gates.find(item=>item.metadata_type===type);
-      return {key,type,description:`Minimized ${type} signal`,sample_value:null,estimated_value_per_event:0,buyer_categories:[],consent_required:type!=='operational',consent_state:gate?.default_state??'conditional'};
+      return {key,type,description:`Minimized ${type} signal`,sample_value:null,estimated_value_per_event:0,buyer_categories:[],consent_required:true,consent_state:gate?.default_state??'blocked'};
     });
     const eligible_for_marketplace=metadata_items.some(item=>item.consent_state==='allowed'&&item.type!=='operational')&&this.offers.length>0;
     const scores:ScoreSet={
@@ -106,7 +106,7 @@ export class IntelligenceEngine {
   public matchMarketplace(req:MarketplaceMatchRequest):MarketplaceMatchResult {
     const appEvents=[...this.events.values()].filter(event=>event.app_id===req.app_id);
     const eligible=appEvents.filter(event=>event.metadata_inspection.eligible_for_marketplace);
-    const matched_offers=this.offers.filter(offer=>offer.status==='active').flatMap(offer=>{
+    const matched_offers=this.offers.filter(offer=>offer.status==='active'&&offer.consent_required).flatMap(offer=>{
       const matching=eligible.filter(event=>event.metadata_inspection.metadata_items.some(item=>item.consent_state==='allowed'&&offer.metadata_types.includes(item.type)));
       if(matching.length===0)return [];
       const rate=offer.pricing_model.min_value_per_event;
