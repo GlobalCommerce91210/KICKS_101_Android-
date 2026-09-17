@@ -29,7 +29,7 @@ android {
         applicationId 'com.datastorm.kicks'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 8
+        versionCode 9
         versionName "0.2.6"
 
         if ((findProperty('kicks.arm64Only') ?: 'false').toBoolean()) {
@@ -57,7 +57,7 @@ android {
             minifyEnabled enableMinifyInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             def enablePngCrunchInRelease = findProperty('android.enablePngCrunchInReleaseBuilds') ?: 'true'
-            crunchPngs enablePngCrunchInRelease.toBoolean()
+            crunchPngs enablePngCrunchInReleaseBuilds.toBoolean()
         }
     }
     packagingOptions {
