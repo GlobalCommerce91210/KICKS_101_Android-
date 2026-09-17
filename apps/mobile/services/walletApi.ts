@@ -102,7 +102,7 @@ export const walletApi = {
     return data.earnings_by_metadata ?? {};
   },
 
-  async recordEventEarnings(eventId?: string, userId = 'user_demo_01'): Promise<{
+  async recordEventEarnings(eventId: string, userId: string): Promise<{
     permitted: boolean;
     denial_reason: string | null;
     ledger_entry: WalletLedgerEntry;
