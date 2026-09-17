@@ -39,6 +39,20 @@ jobs:
           -Pkicks.collectorProvisioningEnabled=true
           -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
           --max-workers=2 --console=plain
+      - name: Audit merged release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p cloud-apk
+          manifest="$(find apps/mobile/android/app/build/intermediates -type f -name AndroidManifest.xml | grep -E '/(merged_manifest|merged_manifests)/release/' | head -n 1 || true)"
+          test -n "$manifest"
+          cp "$manifest" cloud-apk/AndroidManifest-merged-release.xml
+          ! grep -q 'android.permission.SYSTEM_ALERT_WINDOW' "$manifest"
+          ! grep -q 'android.permission.READ_EXTERNAL_STORAGE' "$manifest"
+          ! grep -q 'android.permission.WRITE_EXTERNAL_STORAGE' "$manifest"
+          ! grep -q 'android.permission.VIBRATE' "$manifest"
+          grep -q 'android.permission.BIND_VPN_SERVICE' "$manifest"
+          grep -q 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE' "$manifest"
       - name: Prepare APK and checksum
         shell: bash
         run: |
@@ -53,6 +67,7 @@ jobs:
             'Package: com.datastorm.kicks; versionCode: 8.' \
             'ABIs: armeabi-v7a and arm64-v8a; JavaScript is bundled.' \
             'Collector and ADB provisioning support compiled in; runtime consent and VPN authorization still required.' \
+            'Merged release AndroidManifest.xml is included for privacy/permission audit evidence.' \
             'Sign with the existing installation key and verify the installed certificate before upgrading.' \
             'Never uninstall or clear app data to resolve a signature mismatch.' \
             'No device data or signing keys are included.' \
