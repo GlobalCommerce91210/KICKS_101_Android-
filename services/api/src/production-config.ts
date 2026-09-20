@@ -4,6 +4,28 @@ export interface ProductionRuntimeConfig {
   publicApiUrl?: string;
 }
 
+export interface RuntimeEnvironmentInput {
+  nodeEnvironment?: string;
+  kicksEnvironment?: string;
+}
+
+export function resolveRuntimeEnvironment(input: RuntimeEnvironmentInput): 'staging' | 'production' {
+  const kicksEnvironment = input.kicksEnvironment?.trim();
+
+  if (kicksEnvironment && kicksEnvironment !== 'staging' && kicksEnvironment !== 'production') {
+    throw new Error(`KICKS_ENVIRONMENT must be either staging or production; received ${JSON.stringify(kicksEnvironment)}.`);
+  }
+
+  if (input.nodeEnvironment === 'production') {
+    if (kicksEnvironment === 'staging') {
+      throw new Error('NODE_ENV=production cannot run with KICKS_ENVIRONMENT=staging.');
+    }
+    return 'production';
+  }
+
+  return kicksEnvironment === 'production' ? 'production' : 'staging';
+}
+
 export function validateProductionRuntimeConfig(config: ProductionRuntimeConfig): void {
   if (config.environment !== 'production') return;
 
