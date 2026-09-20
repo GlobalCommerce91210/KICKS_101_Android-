@@ -21,6 +21,7 @@ import {
 import { registerDataStormIdentityRoutes } from './datastorm-identity-routes.js';
 import { registerKicksConsumerRoutes } from './kicks-consumer-routes.js';
 import { KICKS_BRAND_MANIFEST } from './branding.js';
+import { resolveRuntimeEnvironment, validateProductionRuntimeConfig } from './production-config.js';
 import { AppPermission, BuyerPermission, MetadataPermission, PermissionsEngine } from './permissions.js';
 import {
   governEngineSnapshot,
@@ -164,10 +165,18 @@ export function buildServer(options: {
   consumerDeviceBindingStore?: ConsumerDeviceBindingStore;
 } = {}) {
   const databaseUrl = process.env.DATABASE_URL ?? process.env.KICKS_DATABASE_URL;
+  const environment = resolveRuntimeEnvironment({
+    nodeEnvironment: process.env.NODE_ENV,
+    kicksEnvironment: options.environment ?? process.env.KICKS_ENVIRONMENT,
+  });
+  validateProductionRuntimeConfig({
+    environment,
+    databaseUrl,
+    publicApiUrl: process.env.KICKS_PUBLIC_API_URL,
+  });
   const store = options.store ?? (databaseUrl
     ? PostgresStore.fromConnectionString(databaseUrl)
     : new MemoryStore());
-  const environment = options.environment ?? (process.env.KICKS_ENVIRONMENT === 'production' ? 'production' : 'staging');
   const requestedEngineMode = options.requestedEngineMode ?? normalizeEngineMode(process.env.KICKS_ENGINE_MODE, environment);
   const manualProductionApproval = options.manualProductionApproval
     ?? process.env.KICKS_ENGINE_MANUAL_OVERRIDE === 'production';
