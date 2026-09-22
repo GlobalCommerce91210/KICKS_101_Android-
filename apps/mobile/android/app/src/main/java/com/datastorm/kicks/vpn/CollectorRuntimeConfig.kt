@@ -44,7 +44,31 @@ object CollectorRuntimeConfig {
     return updated
   }
 
+  fun updateAccessCredentials(
+    context: Context,
+    accessClientId: String,
+    accessClientSecret: String,
+  ): CollectorConfig {
+    check(!KicksVpnService.isActive && ActiveMonitoringSession.current() == null) {
+      "Stop monitoring before updating Access credentials."
+    }
+    val current = get(context) ?: throw IllegalStateException("This device has not been securely provisioned.")
+    val updated = current.withAccessCredentials(accessClientId, accessClientSecret)
+    SecureCollectorConfigStore.save(context, updated)
+    value = updated
+    return updated
+  }
+
   fun get(context: Context): CollectorConfig? = value ?: SecureCollectorConfigStore.load(context)?.also { value = it }
   fun isProvisioned(context: Context): Boolean = get(context) != null
   fun clearRuntime() { value = null }
+}
+
+internal fun CollectorConfig.withAccessCredentials(
+  accessClientId: String,
+  accessClientSecret: String,
+): CollectorConfig {
+  require(accessClientId.endsWith(".access")) { "A Cloudflare Access client identifier is required." }
+  require(accessClientSecret.length >= 32) { "A Cloudflare Access client secret is required." }
+  return copy(accessClientId = accessClientId, accessClientSecret = accessClientSecret)
 }

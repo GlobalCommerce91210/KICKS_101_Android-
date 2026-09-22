@@ -56,8 +56,17 @@ object MonitoringConsentClient {
       val status = connection.responseCode
       val text = (if (status in 200..299) connection.inputStream else connection.errorStream)
         ?.bufferedReader(StandardCharsets.UTF_8)?.use { it.readText() }.orEmpty()
-      if (status !in 200..299) throw IllegalStateException("Consent ledger rejected the request ($status).")
+      if (status !in 200..299) {
+        throw IllegalStateException(consentFailureMessage(status, connection.getHeaderField("Cf-Access-Aud")))
+      }
       return text
     } finally { connection.disconnect() }
   }
 }
+
+internal fun consentFailureMessage(status: Int, accessAudience: String?): String =
+  if (status == 403 && !accessAudience.isNullOrBlank()) {
+    "Cloudflare Access rejected the consent request (403). Monitoring remains off."
+  } else {
+    "Consent ledger rejected the request ($status). Monitoring remains off."
+  }
