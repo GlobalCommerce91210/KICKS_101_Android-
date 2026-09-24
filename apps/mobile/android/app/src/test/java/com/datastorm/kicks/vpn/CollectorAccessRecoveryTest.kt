@@ -31,6 +31,13 @@ class CollectorAccessRecoveryTest {
     assertEquals("old.access", original.accessClientId)
   }
 
+  @Test fun accessRotationRejectsEveryEnrollmentField() {
+    requireAccessRotationOnly(false, false, false)
+    assertThrows(IllegalStateException::class.java) { requireAccessRotationOnly(true, false, false) }
+    assertThrows(IllegalStateException::class.java) { requireAccessRotationOnly(false, true, false) }
+    assertThrows(IllegalStateException::class.java) { requireAccessRotationOnly(false, false, true) }
+  }
+
   @Test fun consent403DistinguishesCloudflareFromUnknownOrigin() {
     assertEquals(
       "Cloudflare Access rejected the consent request (403). Monitoring remains off.",
