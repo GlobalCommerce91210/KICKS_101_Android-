@@ -35,6 +35,13 @@ jobs:
       - name: Typecheck mobile workspace
         run: npm --workspace @kicks/mobile run typecheck
 
+      - name: Select Xcode 26.2 (Swift 6.2)
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+          xcodebuild -version
+          swift --version
+
       - name: Record Xcode environment
         run: xcodebuild -version
 
