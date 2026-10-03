@@ -1,4 +1,89 @@
-# KICK'S MVP — Android First
+# KICK'S Mobile Hub — Android Native + Expo/React Native
+
+This repository is the **single source of truth for active KICK’S mobile development**.
+
+It combines:
+
+- **Native Android layer** for device-level capabilities, Android-specific integrations, collectors, services, and performance-critical modules.
+- **Expo/React Native layer** at `apps/mobile` for the cross-platform KICK’S application.
+- **Shared product logic** for agents, event schemas, design tokens, navigation models, consent-aware flows, and the unified KICK’S user journey.
+
+## Canonical mobile workspace
+
+| Area | Canonical location | Status |
+| --- | --- | --- |
+| Native Android | Repository root / Android modules | Active |
+| Expo / React Native | `apps/mobile` | Active — source of truth |
+| Expo package | `@kicks/mobile` | Active |
+| Current Expo version | `0.2.5` | Current |
+| Next functional target | `0.2.6` | Planned |
+| Legacy Expo repo | `GlobalCommerce91210/KICK_S_App/apps/mobile` | Deprecated — no new work |
+
+> **Routing rule:** All new KICK’S mobile work goes to this repository. Do not route new mobile development to `KICK_S_App/apps/mobile`.
+
+## Hybrid architecture responsibilities
+
+### Native Android
+
+Use native Android for platform-specific capabilities such as device integrations, services, collectors, permissions, secure storage, networking hooks, and other functionality that requires direct Android APIs.
+
+### Expo / React Native
+
+The active Expo app lives at:
+
+```text
+apps/mobile/
+```
+
+Current workspace metadata:
+
+- Package: `@kicks/mobile`
+- Version: `0.2.5`
+- Expo SDK: `57`
+- React Native: `0.86.2`
+- React: `19.2.3`
+- Router: Expo Router
+
+Expo owns the shared cross-platform application shell, screen flows, navigation, design system, and reusable consumer-facing logic.
+
+### Shared system layer
+
+Native Android and Expo should converge on the same product contracts, including:
+
+- agent interfaces and event handling
+- verified-action and consent event schemas
+- design tokens and Night/Light themes
+- navigation and journey definitions
+- identity and account state
+- reward/progression state
+- partner-action state
+
+Platform implementations may differ, but product behavior and contracts should remain aligned.
+
+## Development
+
+From the repository root:
+
+```bash
+npm install
+npm run typecheck
+npm run test
+npm --workspace @kicks/mobile run start
+```
+
+To run Android through Expo when appropriate:
+
+```bash
+npm --workspace @kicks/mobile run android
+```
+
+For native Android work, use the repository's Gradle/Android Studio workflow.
+
+## Versioning direction
+
+The Expo workspace is currently **0.2.5**. The next aligned KICK’S functional release target is **0.2.6**. Do not bump the Expo package version merely for documentation; version changes should accompany the actual 0.2.6 implementation/release gate.
+
+---
 
 KICK'S is the official DataStorm Inc. privacy and data-value product and app, formerly known as Kickback's. This standalone application is derived from validated concepts in the existing Base44 beta. The Base44 application remains untouched and is not the production control plane.
 
