@@ -7,7 +7,7 @@
     "dev": "tsx watch src/start.ts",
     "start": "tsx src/start.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test src/*.test.ts"
+    "test": "NODE_ENV=test node --import tsx --test src/*.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
