@@ -1,0 +1,660 @@
+openapi: 3.1.0
+info:
+  title: KICK'S DATA EXCHANGE – Enterprise Intelligence API
+  version: 1.0.0
+  description: >
+    Partner-facing and internal intelligence API:
+    - E‑PRX, N‑CDE, G‑IME, Skybridge/QIXL
+    - Partner studies, parameter packs, funding
+    - National, global, quantum intelligence
+    - Global Intelligence Units (GIUs), projections, clusters, transformations
+
+servers:
+  - url: https://api.kicksdataexchange.com
+    description: Production
+  - url: https://sandbox.kicksdataexchange.com
+    description: Sandbox
+
+tags:
+  - name: auth
+  - name: partners
+  - name: studies
+  - name: national
+  - name: global
+  - name: skybridge
+  - name: websockets
+  - name: webhooks
+
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Partner login and obtain access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthToken'
+        '401':
+          description: Invalid credentials
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Refresh access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthToken'
+
+  /partners/me:
+    get:
+      tags: [partners]
+      summary: Get current partner profile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Partner profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartnerProfile'
+
+  /partners/studies:
+    post:
+      tags: [studies]
+      summary: Create partner study with parameter pack (PPDE)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartnerStudyCreate'
+      responses:
+        '201':
+          description: Study created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartnerStudy'
+    get:
+      tags: [studies]
+      summary: List partner studies
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Studies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PartnerStudy'
+
+  /partners/studies/{studyId}/fund:
+    post:
+      tags: [studies]
+      summary: Fund a study via Partner Contribution Reserve (PCR)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: studyId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartnerFundingRequest'
+      responses:
+        '200':
+          description: Study funded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartnerStudy'
+
+  /partners/studies/{studyId}/insights:
+    get:
+      tags: [studies]
+      summary: Retrieve delivered insights (PIDE/NIDE/GIDE)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: studyId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Insights
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsightDelivery'
+
+  /national/cohorts:
+    get:
+      tags: [national]
+      summary: List national cohorts (NCFE)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: countryCode
+          schema:
+            type: string
+      responses:
+        '200':
+          description: National cohorts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Cohort'
+
+  /national/insights:
+    get:
+      tags: [national]
+      summary: Get national insight bundles (NIBE)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: countryCode
+          schema:
+            type: string
+      responses:
+        '200':
+          description: National insights
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NationalInsightBundle'
+
+  /global/intelligence-units:
+    get:
+      tags: [global]
+      summary: List Global Intelligence Units (GIUs)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: GIUs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GlobalIntelligenceUnit'
+
+  /global/insight-projections:
+    get:
+      tags: [global]
+      summary: List Global Insight Projections (GIPs)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Projections
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GlobalInsightProjection'
+
+  /global/insight-clusters:
+    get:
+      tags: [global]
+      summary: List Global Insight Clusters (GICs)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Clusters
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GlobalInsightCluster'
+
+  /global/insight-transformations:
+    get:
+      tags: [global]
+      summary: List Global Insight Transformations (GITs)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Transformations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GlobalInsightTransformation'
+
+  /skybridge/quantum-insights:
+    get:
+      tags: [skybridge]
+      summary: Get Quantum Insight Levels for partner/global scope
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: scope
+          schema:
+            type: string
+            enum: [partner, global, system]
+      responses:
+        '200':
+          description: Quantum insights
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuantumInsightSet'
+
+  /skybridge/kic-flow:
+    get:
+      tags: [skybridge]
+      summary: View KIC flow map across tiers
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Flow map
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KICFlowMap'
+
+  /ws/quantum:
+    get:
+      tags: [websockets]
+      summary: WebSocket – subscribe to quantum intelligence events
+      description: >
+        Channels:
+        - /ws/quantum/partner/{partnerId}
+        - /ws/quantum/global
+        - /ws/quantum/system
+      responses:
+        '101':
+          description: WebSocket upgrade
+
+webhooks:
+  studyInsightReady:
+    post:
+      tags: [webhooks]
+      summary: Notify partner when study insights are ready
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StudyInsightWebhookEvent'
+      responses:
+        '200':
+          description: Acknowledged
+
+  globalSignalShift:
+    post:
+      tags: [webhooks]
+      summary: Notify when a significant global intelligence shift occurs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GlobalSignalWebhookEvent'
+      responses:
+        '200':
+          description: Acknowledged
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required: [email, password]
+
+    RefreshRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+      required: [refreshToken]
+
+    AuthToken:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        expiresIn:
+          type: integer
+
+    PartnerProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        organizationName:
+          type: string
+        contactEmail:
+          type: string
+          format: email
+        webhookUrl:
+          type: string
+          format: uri
+          nullable: true
+
+    ParameterPack:
+      type: object
+      properties:
+        demographics:
+          type: object
+          additionalProperties: true
+        behavior:
+          type: object
+          additionalProperties: true
+        sentiment:
+          type: object
+          additionalProperties: true
+        cultural:
+          type: object
+          additionalProperties: true
+        consumption:
+          type: object
+          additionalProperties: true
+        regionCode:
+          type: string
+          nullable: true
+        countryCode:
+          type: string
+          nullable: true
+        minCohortSize:
+          type: integer
+        maxCohortSize:
+          type: integer
+
+    PartnerStudyCreate:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        parameterPack:
+          $ref: '#/components/schemas/ParameterPack'
+        webhookUrl:
+          type: string
+          format: uri
+          nullable: true
+      required: [name, parameterPack]
+
+    PartnerStudy:
+      type: object
+      properties:
+        id:
+          type: string
+        partnerId:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        parameterPack:
+          $ref: '#/components/schemas/ParameterPack'
+        fundedAmount:
+          type: number
+        status:
+          type: string
+          enum: [draft, active, completed, cancelled]
+
+    PartnerFundingRequest:
+      type: object
+      properties:
+        amount:
+          type: number
+        unit:
+          type: string
+          default: KIC
+      required: [amount]
+
+    InsightDelivery:
+      type: object
+      properties:
+        studyId:
+          type: string
+        scope:
+          type: string
+          enum: [regional, national, global, quantum]
+        generatedAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          additionalProperties: true
+
+    Cohort:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        scope:
+          type: string
+          enum: [regional, national, global]
+        regionCode:
+          type: string
+          nullable: true
+        countryCode:
+          type: string
+          nullable: true
+        size:
+          type: integer
+        specialization:
+          type: string
+        stabilityScore:
+          type: number
+        diversityScore:
+          type: number
+
+    NationalInsightBundle:
+      type: object
+      properties:
+        id:
+          type: string
+        countryCode:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        cohortIds:
+          type: array
+          items:
+            type: string
+
+    GlobalIntelligenceUnit:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        signals:
+          type: array
+          items:
+            type: string
+        stabilityScore:
+          type: number
+
+    GlobalInsightProjection:
+      type: object
+      properties:
+        id:
+          type: string
+        unitId:
+          type: string
+        horizon:
+          type: string
+          enum: [short, medium, long]
+        projectionData:
+          type: object
+          additionalProperties: true
+
+    GlobalInsightCluster:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        unitIds:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+
+    GlobalInsightTransformation:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        sourceUnitIds:
+          type: array
+          items:
+            type: string
+        transformationLogic:
+          type: string
+
+    QuantumInsightSet:
+      type: object
+      properties:
+        scope:
+          type: string
+        levels:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuantumInsightLevel'
+
+    QuantumInsightLevel:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        altitude:
+          type: string
+          enum: [regional, partner, national, global, quantum]
+        metrics:
+          type: object
+          additionalProperties: true
+
+    KICFlowMap:
+      type: object
+      properties:
+        partnerId:
+          type: string
+          nullable: true
+        flows:
+          type: array
+          items:
+            $ref: '#/components/schemas/KICFlowSegment'
+
+    KICFlowSegment:
+      type: object
+      properties:
+        fromTier:
+          type: string
+        toTier:
+          type: string
+        amount:
+          type: number
+        direction:
+          type: string
+          enum: [upward, downward]
+
+    StudyInsightWebhookEvent:
+      type: object
+      properties:
+        eventId:
+          type: string
+        type:
+          type: string
+          enum: [study.insight.ready]
+        studyId:
+          type: string
+        insight:
+          $ref: '#/components/schemas/InsightDelivery'
+        occurredAt:
+          type: string
+          format: date-time
+
+    GlobalSignalWebhookEvent:
+      type: object
+      properties:
+        eventId:
+          type: string
+        type:
+          type: string
+          enum: [global.signal.shift]
+        unitId:
+          type: string
+          nullable: true
+        details:
+          type: object
+          additionalProperties: true
+        occurredAt:
+          type: string
+          format: date-time
