@@ -1,0 +1,594 @@
+openapi: 3.1.0
+info:
+  title: KICK'S – Consumer App API
+  version: 1.0.0
+  description: >
+    Consumer-facing API for the KICK'S app:
+    - Identity, social linking
+    - Regional packages & cohorts (R‑CPIE)
+    - KIC wallet, accrual, redemption
+    - Apparel Marketplace
+    - Consumer-side quantum insights (read-only)
+
+servers:
+  - url: https://api.kicks.app
+    description: Production
+  - url: https://sandbox.kicks.app
+    description: Sandbox
+
+tags:
+  - name: auth
+  - name: consumers
+  - name: regional
+  - name: kic
+  - name: marketplace
+  - name: insights
+  - name: websockets
+  - name: webhooks
+
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Login and obtain access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthToken'
+        '401':
+          description: Invalid credentials
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Refresh access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthToken'
+
+  /consumers/me:
+    get:
+      tags: [consumers]
+      summary: Get current consumer profile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Consumer profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsumerProfile'
+
+  /consumers/me/social-links:
+    post:
+      tags: [consumers]
+      summary: Link social accounts to regional identity
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SocialLinkRequest'
+      responses:
+        '200':
+          description: Links updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsumerProfile'
+
+  /regional/packages:
+    post:
+      tags: [regional]
+      summary: Create a regional consumer package
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegionalPackageCreate'
+      responses:
+        '201':
+          description: Package created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegionalPackage'
+    get:
+      tags: [regional]
+      summary: List consumer’s regional packages
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Packages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RegionalPackage'
+
+  /regional/cohorts:
+    get:
+      tags: [regional]
+      summary: List available regional cohorts
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: regionCode
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cohorts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Cohort'
+
+  /regional/cohorts/{cohortId}/join:
+    post:
+      tags: [regional]
+      summary: Join a regional cohort
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: cohortId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Joined
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CohortMembership'
+
+  /kic/balance:
+    get:
+      tags: [kic]
+      summary: Get consumer KIC balance
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KICBalance'
+
+  /kic/history:
+    get:
+      tags: [kic]
+      summary: Get KIC accrual and redemption history
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: History
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/KICTransaction'
+
+  /kic/accrual:
+    get:
+      tags: [kic]
+      summary: View current accrual opportunities
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Opportunities
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccrualOpportunity'
+
+  /marketplace/items:
+    get:
+      tags: [marketplace]
+      summary: List redeemable items in KICK'S Apparel Marketplace
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: category
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MarketplaceItem'
+
+  /marketplace/orders:
+    post:
+      tags: [marketplace]
+      summary: Redeem KIC for goods
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarketplaceOrderCreate'
+      responses:
+        '201':
+          description: Order created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketplaceOrder'
+
+  /insights/quantum:
+    get:
+      tags: [insights]
+      summary: Get consumer quantum insight view (read-only)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Quantum insights
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuantumInsightSet'
+
+  /ws/consumer:
+    get:
+      tags: [websockets]
+      summary: WebSocket – subscribe to consumer events
+      description: >
+        Channels:
+        - /ws/consumer/{consumerId}/kic
+        - /ws/consumer/{consumerId}/cohorts
+        - /ws/consumer/{consumerId}/insights
+      responses:
+        '101':
+          description: WebSocket upgrade
+
+webhooks:
+  kicAccrued:
+    post:
+      tags: [webhooks]
+      summary: Notify external systems when KIC is accrued
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KICWebhookEvent'
+      responses:
+        '200':
+          description: Acknowledged
+
+  orderStatusChanged:
+    post:
+      tags: [webhooks]
+      summary: Notify when marketplace order status changes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderWebhookEvent'
+      responses:
+        '200':
+          description: Acknowledged
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required: [email, password]
+
+    RefreshRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+      required: [refreshToken]
+
+    AuthToken:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        expiresIn:
+          type: integer
+
+    ConsumerProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        displayName:
+          type: string
+        regionCode:
+          type: string
+        socialLinks:
+          type: array
+          items:
+            $ref: '#/components/schemas/SocialLink'
+        kicBalance:
+          $ref: '#/components/schemas/KICBalance'
+
+    SocialLink:
+      type: object
+      properties:
+        platform:
+          type: string
+          enum: [facebook, instagram, tiktok, x, youtube, telegram, snapchat, reddit, discord]
+        handle:
+          type: string
+        verified:
+          type: boolean
+
+    SocialLinkRequest:
+      type: object
+      properties:
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/SocialLink'
+      required: [links]
+
+    RegionalPackageCreate:
+      type: object
+      properties:
+        regionCode:
+          type: string
+        type:
+          type: string
+          enum: [lifestyle, influence, consumption, sentiment, cultural, movement]
+        signals:
+          type: array
+          items:
+            type: string
+      required: [regionCode, type, signals]
+
+    RegionalPackage:
+      type: object
+      properties:
+        id:
+          type: string
+        consumerId:
+          type: string
+        regionCode:
+          type: string
+        type:
+          type: string
+        signals:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Cohort:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        scope:
+          type: string
+          enum: [regional]
+        regionCode:
+          type: string
+        size:
+          type: integer
+        specialization:
+          type: string
+        stabilityScore:
+          type: number
+        diversityScore:
+          type: number
+
+    CohortMembership:
+      type: object
+      properties:
+        cohortId:
+          type: string
+        consumerId:
+          type: string
+        joinedAt:
+          type: string
+          format: date-time
+
+    KICBalance:
+      type: object
+      properties:
+        consumerId:
+          type: string
+        available:
+          type: number
+        reserved:
+          type: number
+        unit:
+          type: string
+          default: KIC
+
+    KICTransaction:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [accrual, redemption, adjustment]
+        amount:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+
+    AccrualOpportunity:
+      type: object
+      properties:
+        id:
+          type: string
+        description:
+          type: string
+        kicReward:
+          type: number
+        expiresAt:
+          type: string
+          format: date-time
+
+    MarketplaceItem:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        kicPrice:
+          type: number
+        inStock:
+          type: boolean
+
+    MarketplaceOrderCreate:
+      type: object
+      properties:
+        itemId:
+          type: string
+        quantity:
+          type: integer
+        shippingAddress:
+          type: object
+          additionalProperties: true
+      required: [itemId, quantity]
+
+    MarketplaceOrder:
+      type: object
+      properties:
+        id:
+          type: string
+        consumerId:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MarketplaceItem'
+        totalKIC:
+          type: number
+        status:
+          type: string
+          enum: [pending, confirmed, shipped, delivered, cancelled]
+
+    QuantumInsightSet:
+      type: object
+      properties:
+        consumerId:
+          type: string
+        levels:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuantumInsightLevel'
+
+    QuantumInsightLevel:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        altitude:
+          type: string
+          enum: [regional, partner, national, global, quantum]
+        metrics:
+          type: object
+          additionalProperties: true
+
+    KICWebhookEvent:
+      type: object
+      properties:
+        eventId:
+          type: string
+        type:
+          type: string
+          enum: [kic.accrued, kic.redeemed]
+        transaction:
+          $ref: '#/components/schemas/KICTransaction'
+        occurredAt:
+          type: string
+          format: date-time
+
+    OrderWebhookEvent:
+      type: object
+      properties:
+        eventId:
+          type: string
+        type:
+          type: string
+          enum: [order.status.changed]
+        order:
+          $ref: '#/components/schemas/MarketplaceOrder'
+        occurredAt:
+          type: string
+          format: date-time
