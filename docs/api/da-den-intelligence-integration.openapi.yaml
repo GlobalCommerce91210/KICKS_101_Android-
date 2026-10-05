@@ -1,0 +1,461 @@
+openapi: 3.1.0
+info:
+  title: Da-DEN Intelligence Integration API
+  version: 1.0.0
+  description: >
+    Da-DEN live show intelligence ingestion platform.
+    - Real-time ingestion during episodes
+    - Consent activation for Intelligent Generator Accounts (IGAs)
+    - Live KIC accrual
+    - Live dataset streaming into the Intelligence Value System (IVS)
+    - Mobile ingestion vs. show participation mechanics
+    - Skybridge (QIXL) integration
+
+servers:
+  - url: https://api.daden.live
+    description: Production
+  - url: https://sandbox.daden.live
+    description: Sandbox
+
+tags:
+  - name: auth
+  - name: consent
+  - name: iga
+  - name: ingestion
+  - name: events
+  - name: kic
+  - name: skybridge
+  - name: webhooks
+  - name: websockets
+
+paths:
+  /auth/producer/login:
+    post:
+      tags: [auth]
+      summary: Authenticate Da-DEN producer or show system
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProducerLoginRequest'
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthToken'
+
+  /auth/consumer/link:
+    post:
+      tags: [auth]
+      summary: Link a KICK'S consumer to Da-DEN participation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsumerLinkRequest'
+      responses:
+        '200':
+          description: Linked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsumerLinkResponse'
+
+  /consent/activate:
+    post:
+      tags: [consent]
+      summary: Activate consent for Intelligent Generator Account (IGA)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsentActivationRequest'
+      responses:
+        '200':
+          description: Consent activated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsentActivationResponse'
+
+  /iga/create:
+    post:
+      tags: [iga]
+      summary: Create Intelligent Generator Account for a consumer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IGACreateRequest'
+      responses:
+        '201':
+          description: IGA created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IGA'
+
+  /iga/{igaId}:
+    get:
+      tags: [iga]
+      summary: Get IGA details
+      parameters:
+        - in: path
+          name: igaId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: IGA details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IGA'
+
+  /ingestion/live:
+    post:
+      tags: [ingestion]
+      summary: Ingest real-time viewer interaction during Da-DEN episode
+      description: >
+        Mobile ingestion endpoint for consumer interactions:
+        - taps
+        - votes
+        - reactions
+        - sentiment
+        - movement signals
+        - attention signals
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiveIngestionEvent'
+      responses:
+        '200':
+          description: Ingested
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionResponse'
+
+  /events/show:
+    post:
+      tags: [events]
+      summary: Push real-time show events from Da-DEN studio
+      description: >
+        Producer-side ingestion:
+        - segment start
+        - segment end
+        - guest interaction
+        - cultural signal
+        - sentiment trigger
+        - movement trigger
+        - intelligence marker
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShowEvent'
+      responses:
+        '200':
+          description: Event accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowEventResponse'
+
+  /kic/accrue:
+    post:
+      tags: [kic]
+      summary: Accrue KIC for consumer based on live participation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KICAccrualRequest'
+      responses:
+        '200':
+          description: KIC accrued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KICAccrualResponse'
+
+  /skybridge/ingest:
+    post:
+      tags: [skybridge]
+      summary: Push processed Da-DEN intelligence into Skybridge (QIXL)
+      description: >
+        Sends intelligence upward:
+        - regional signals
+        - national signals
+        - global signals
+        - quantum signals
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkybridgeIngestionRequest'
+      responses:
+        '200':
+          description: Ingested into Skybridge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkybridgeIngestionResponse'
+
+  /ws/live:
+    get:
+      tags: [websockets]
+      summary: WebSocket – real-time ingestion stream
+      description: >
+        Channels:
+        - /ws/live/consumer/{consumerId}
+        - /ws/live/show/{showId}
+        - /ws/live/global
+      responses:
+        '101':
+          description: WebSocket upgrade
+
+webhooks:
+  ingestionReceived:
+    post:
+      tags: [webhooks]
+      summary: Notify external systems when ingestion is processed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestionWebhookEvent'
+      responses:
+        '200':
+          description: Acknowledged
+
+  kicAccrued:
+    post:
+      tags: [webhooks]
+      summary: Notify when KIC is accrued from Da-DEN participation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KICWebhookEvent'
+      responses:
+        '200':
+          description: Acknowledged
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ProducerLoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+      required: [email, password]
+
+    AuthToken:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        expiresIn:
+          type: integer
+
+    ConsumerLinkRequest:
+      type: object
+      properties:
+        consumerId:
+          type: string
+        deviceId:
+          type: string
+      required: [consumerId, deviceId]
+
+    ConsumerLinkResponse:
+      type: object
+      properties:
+        linked:
+          type: boolean
+        igaId:
+          type: string
+
+    ConsentActivationRequest:
+      type: object
+      properties:
+        consumerId:
+          type: string
+        consentType:
+          type: string
+          enum: [live_ingestion, sentiment, movement, cultural]
+      required: [consumerId, consentType]
+
+    ConsentActivationResponse:
+      type: object
+      properties:
+        consentId:
+          type: string
+        active:
+          type: boolean
+
+    IGACreateRequest:
+      type: object
+      properties:
+        consumerId:
+          type: string
+        consentId:
+          type: string
+      required: [consumerId, consentId]
+
+    IGA:
+      type: object
+      properties:
+        id:
+          type: string
+        consumerId:
+          type: string
+        consentId:
+          type: string
+        active:
+          type: boolean
+
+    LiveIngestionEvent:
+      type: object
+      properties:
+        consumerId:
+          type: string
+        igaId:
+          type: string
+        eventType:
+          type: string
+          enum: [tap, vote, reaction, sentiment, movement, attention]
+        payload:
+          type: object
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+      required: [consumerId, igaId, eventType, timestamp]
+
+    IngestionResponse:
+      type: object
+      properties:
+        ingestionId:
+          type: string
+        accepted:
+          type: boolean
+
+    ShowEvent:
+      type: object
+      properties:
+        showId:
+          type: string
+        segmentId:
+          type: string
+        eventType:
+          type: string
+          enum: [segment_start, segment_end, guest_interaction, cultural_signal, sentiment_trigger, movement_trigger, intelligence_marker]
+        payload:
+          type: object
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+      required: [showId, eventType, timestamp]
+
+    ShowEventResponse:
+      type: object
+      properties:
+        eventId:
+          type: string
+        accepted:
+          type: boolean
+
+    KICAccrualRequest:
+      type: object
+      properties:
+        consumerId:
+          type: string
+        igaId:
+          type: string
+        kicAmount:
+          type: number
+        reason:
+          type: string
+      required: [consumerId, igaId, kicAmount]
+
+    KICAccrualResponse:
+      type: object
+      properties:
+        transactionId:
+          type: string
+        newBalance:
+          type: number
+
+    SkybridgeIngestionRequest:
+      type: object
+      properties:
+        source:
+          type: string
+          enum: [regional, national, global, quantum]
+        signals:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required: [source, signals]
+
+    SkybridgeIngestionResponse:
+      type: object
+      properties:
+        ingestionId:
+          type: string
+        altitude:
+          type: string
+          enum: [regional, national, global, quantum]
+
+    IngestionWebhookEvent:
+      type: object
+      properties:
+        ingestionId:
+          type: string
+        consumerId:
+          type: string
+        eventType:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+
+    KICWebhookEvent:
+      type: object
+      properties:
+        transactionId:
+          type: string
+        consumerId:
+          type: string
+        kicAmount:
+          type: number
+        occurredAt:
+          type: string
+          format: date-time
