@@ -26,6 +26,9 @@ type Tab = 'apps' | 'metadata' | 'buyers' | 'audit_log';
 export default function Permissions() {
   const [activeTab, setActiveTab] = useState<Tab>('apps');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [metadataLoaded, setMetadataLoaded] = useState(false);
   const [apps, setApps] = useState<AppPermission[]>([]);
   const [selectedAppId, setSelectedAppId] = useState('com.example.shop');
   const [metadataPerms, setMetadataPerms] = useState<MetadataPermission[]>([]);
@@ -36,6 +39,9 @@ export default function Permissions() {
 
   const loadData = async () => {
     setLoading(true);
+    setError(null);
+    setLoaded(false);
+    setMetadataLoaded(false);
     try {
       const [appData, buyerData, effectiveData, logData] = await Promise.all([
         permissionsApi.getAppPermissions(USER_ID),
@@ -49,13 +55,18 @@ export default function Permissions() {
       setConsentLogs(logData.items);
 
       if (appData.length > 0) {
-        const currentApp = selectedAppId || appData[0]?.app_id || 'com.example.shop';
+        const currentApp = appData.some(app => app.app_id === selectedAppId)
+          ? selectedAppId : appData[0].app_id;
         setSelectedAppId(currentApp);
         const meta = await permissionsApi.getMetadataPermissions(USER_ID, currentApp);
         setMetadataPerms(meta);
+        setMetadataLoaded(true);
+      } else {
+        setMetadataPerms([]);
       }
+      setLoaded(true);
     } catch (err) {
-      console.warn('Failed to load permissions', err);
+      setError('Permissions could not be loaded. No consent changes were made. Check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -66,19 +77,26 @@ export default function Permissions() {
   }, []);
 
   const handleSelectApp = async (appId: string) => {
+    setMetadataLoaded(false);
     setSelectedAppId(appId);
+    if (actionInProgress) return;
+    setError(null);
     setActionInProgress(true);
     try {
       const meta = await permissionsApi.getMetadataPermissions(USER_ID, appId);
       setMetadataPerms(meta);
+        setMetadataLoaded(true);
     } catch (err) {
-      console.warn('Failed to load metadata perms', err);
+      setMetadataPerms([]);
+      setError('Permissions for this app could not be loaded. Try again before making changes.');
     } finally {
       setActionInProgress(false);
     }
   };
 
   const handleUpdateAppState = async (appId: string, newState: PermissionState) => {
+    if (actionInProgress) return;
+    setError(null);
     setActionInProgress(true);
     try {
       const updatedApps = apps.map(a =>
@@ -97,13 +115,16 @@ export default function Permissions() {
       setEffective(eff);
       setConsentLogs(logs.items);
     } catch (err) {
-      console.warn('Failed to update app state', err);
+      setLoaded(false);
+      setError('Your permission change could not be confirmed. Reload to check the saved decision before trying again.');
     } finally {
       setActionInProgress(false);
     }
   };
 
   const handleUpdateMetadataState = async (mtype: string, newState: MetadataState) => {
+    if (actionInProgress) return;
+    setError(null);
     setActionInProgress(true);
     try {
       const updated = metadataPerms.map(m =>
@@ -122,13 +143,16 @@ export default function Permissions() {
       setEffective(eff);
       setConsentLogs(logs.items);
     } catch (err) {
-      console.warn('Failed to update metadata state', err);
+      setLoaded(false);
+      setError('Your permission change could not be confirmed. Reload to check the saved decision before trying again.');
     } finally {
       setActionInProgress(false);
     }
   };
 
   const handleUpdateBuyerState = async (bcategory: string, newState: PermissionState) => {
+    if (actionInProgress) return;
+    setError(null);
     setActionInProgress(true);
     try {
       const updated = buyers.map(b =>
@@ -147,13 +171,16 @@ export default function Permissions() {
       setEffective(eff);
       setConsentLogs(logs.items);
     } catch (err) {
-      console.warn('Failed to update buyer state', err);
+      setLoaded(false);
+      setError('Your permission change could not be confirmed. Reload to check the saved decision before trying again.');
     } finally {
       setActionInProgress(false);
     }
   };
 
   const handleUpdateBuyerBand = async (bcategory: string, newBand: number) => {
+    if (actionInProgress) return;
+    setError(null);
     setActionInProgress(true);
     try {
       const updated = buyers.map(b =>
@@ -171,7 +198,8 @@ export default function Permissions() {
       setEffective(eff);
       setConsentLogs(logs.items);
     } catch (err) {
-      console.warn('Failed to update buyer band', err);
+      setLoaded(false);
+      setError('Your permission change could not be confirmed. Reload to check the saved decision before trying again.');
     } finally {
       setActionInProgress(false);
     }
@@ -189,6 +217,8 @@ export default function Permissions() {
           ? 'blocked'
           : 'allowed';
 
+    if (actionInProgress) return;
+    setError(null);
     setActionInProgress(true);
     try {
       const updated = metadataPerms.map(m => {
@@ -212,7 +242,8 @@ export default function Permissions() {
       setEffective(eff);
       setConsentLogs(logs.items);
     } catch (err) {
-      console.warn('Failed to update override', err);
+      setLoaded(false);
+      setError('Your permission change could not be confirmed. Reload to check the saved decision before trying again.');
     } finally {
       setActionInProgress(false);
     }
@@ -234,12 +265,12 @@ export default function Permissions() {
           </View>
           <View style={s.statusPill}>
             <Ionicons name="shield-checkmark" size={13} color={colors.green} />
-            <Text style={s.statusPillText}>ACTIVE ENFORCEMENT</Text>
+            <Text style={s.statusPillText}>{loading ? 'CONNECTING' : loaded ? 'DEMO POLICY LOADED' : 'NOT CONNECTED'}</Text>
           </View>
         </View>
 
         <Text style={s.heroSub}>
-          Dynamic consent governance. Every app, telemetry field, and buyer access request is evaluated against cryptographic minimization boundaries.
+          Beta permission controls use a demonstration identity. Live collection and consumer account authorization are not enabled.
         </Text>
 
         <View style={s.divider} />
@@ -322,6 +353,15 @@ export default function Permissions() {
         </Pressable>
       </View>
 
+      {error && (
+        <Card>
+          <Text accessibilityRole="alert" style={ui.body}>{error}</Text>
+          <Pressable disabled={loading || actionInProgress} onPress={loadData}>
+            <Text style={[ui.label, { color: colors.orange, marginTop: 8 }]}>RELOAD PERMISSIONS</Text>
+          </Pressable>
+        </Card>
+      )}
+
       {loading ? (
         <Card>
           <View style={s.loadingBox}>
@@ -329,8 +369,8 @@ export default function Permissions() {
             <Text style={s.loadingText}>Syncing permissions state...</Text>
           </View>
         </Card>
-      ) : (
-        <>
+      ) : loaded ? (
+        <View pointerEvents={actionInProgress ? 'none' : 'auto'}>
           {/* TAB 1: MONITORED APPS */}
           {activeTab === 'apps' && (
             <View style={s.section}>
@@ -428,7 +468,7 @@ export default function Permissions() {
           )}
 
           {/* TAB 2: METADATA SIGNALS */}
-          {activeTab === 'metadata' && (
+          {activeTab === 'metadata' && metadataLoaded && (
             <View style={s.section}>
               <View>
                 <Text style={ui.eyebrow}>METADATA-LEVEL GATES</Text>
@@ -684,7 +724,7 @@ export default function Permissions() {
             <View style={s.section}>
               <View style={ui.row}>
                 <View>
-                  <Text style={ui.eyebrow}>IMMUTABLE CONSENT AUDIT</Text>
+                  <Text style={ui.eyebrow}>CONSENT HISTORY</Text>
                   <Text style={ui.h2}>Decision History Ledger</Text>
                 </View>
                 <Text style={s.logCount}>{consentLogs.length} logged</Text>
@@ -721,11 +761,11 @@ export default function Permissions() {
               ))}
             </View>
           )}
-        </>
-      )}
+        </View>
+      ) : null}
 
       {/* Effective Matrix Summary Card */}
-      {effective && (
+      {loaded && effective && (
         <Card>
           <Text style={ui.eyebrow}>EFFECTIVE PERMISSIONS SUMMARY</Text>
           <Text style={ui.body}>
