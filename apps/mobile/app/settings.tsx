@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Linking, NativeModules, Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { BrandHeader, Card, Screen, colors, ui } from '../components/Brand';
@@ -37,7 +38,7 @@ export default function Settings() {
     </Card>
 
     <Text style={ui.eyebrow}>DATA RIGHTS</Text>
-    <Action title="Review permissions" detail="See, grant, or withdraw purpose-specific uses" onPress={() => unavailable('Permission history')} />
+    <Action title="Review permissions" detail="See, grant, or withdraw purpose-specific uses" onPress={() => router.push('/permissions')} />
     <Action title="Export my data" detail="Receive observations, permissions, and rewards" onPress={() => unavailable('Data export')} />
     <Action title="Delete account and data" detail="Permanently request deletion from KICK'S systems" danger onPress={() => unavailable('Account deletion')} />
 
