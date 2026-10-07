@@ -1,0 +1,25 @@
+name: consumer-consent-validation
+on:
+  pull_request:
+    paths:
+      - 'services/api/**'
+      - '.github/workflows/consumer-consent-validation.yml'
+      - 'package.json'
+permissions:
+  contents: read
+jobs:
+  api-consent:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install API dependencies
+        run: npm install --workspace @kicks/api
+      - name: Typecheck API
+        run: npm run typecheck --workspace @kicks/api
+      - name: Test identity and account-to-collector consent
+        working-directory: services/api
+        run: node --import tsx --test src/consumer-identity.test.ts src/consumer-consent.test.ts
