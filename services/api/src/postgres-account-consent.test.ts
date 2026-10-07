@@ -25,6 +25,9 @@ test('PostgreSQL retains mobile account, refresh session, collector binding, con
     const collectorMigration = await readFile(new URL('../db/migrations/002-collector-metadata.sql', import.meta.url), 'utf8');
     await setup.query(collectorMigration);
     await setup.query(collectorMigration);
+    const uniqueness = await readFile(new URL('../db/migrations/003-consent-request-uniqueness.sql', import.meta.url), 'utf8');
+    await setup.query(uniqueness);
+    await setup.query(uniqueness);
   } finally { await setup.end(); }
   let store: PostgresStore;
   let identity: PostgresConsumerIdentityStore;
@@ -76,12 +79,37 @@ test('PostgreSQL retains mobile account, refresh session, collector binding, con
   const devices = await session.request('/core/consumer/v1/devices');
   assert.equal((await devices.json()).devices.length, 1);
   const permissionId = randomUUID();
-  const decision = { permissionId, activationRequestId: randomUUID(), action: 'grant', policyVersion: 'privacy-1', purposeVersion: 'network-safety-1', purpose: 'Detect unexpected data destinations' };
+  const decision = { permissionId, activationRequestId: randomUUID(), action: 'grant' as const, policyVersion: 'privacy-1', purposeVersion: 'network-safety-1', purpose: 'Detect unexpected data destinations' };
   const consentPath = '/core/consumer/v1/devices/' + deviceId + '/consent';
-  const grant = await session.request(consentPath, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(decision) });
-  assert.equal(grant.status, 202);
-  const activationId = (await grant.json()).activationId;
-
+  // Independent Fastify instances/pools share only PostgreSQL state and locks.
+  const peer = buildServer({ store: new PostgresStore(createPool()), consumerIdentityStore: new PostgresConsumerIdentityStore(createPool()), consumerDeviceBindingStore: new PostgresConsumerDeviceBindingStore(createPool()), adminSecret: 'synthetic-admin' });
+  const peerLogin = await peer.inject({ method: 'POST', url: '/core/identity/v1/session', payload: { email: 'wire-contract@example.test', password: 'Synthetic-Password-2026' } });
+  assert.equal(peerLogin.statusCode, 200);
+  const peerHeaders = { authorization: 'Bearer ' + peerLogin.json().access_token };
+  let activationId: string;
+  try {
+    const requests = await Promise.all(Array.from({ length: 12 }, (_, i) => i % 2
+      ? peer.inject({ method: 'POST', url: consentPath, headers: peerHeaders, payload: decision }).then(r => ({ status: r.statusCode, body: r.json() }))
+      : session.request(consentPath, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(decision) }).then(async r => ({ status: r.status, body: await r.json() }))));
+    assert.equal(requests.filter(r => r.status === 202).length, 1);
+    assert.equal(requests.filter(r => r.status === 200).length, 11);
+    assert.equal(new Set(requests.map(r => r.body.id)).size, 1);
+    activationId = requests[0]!.body.activationId;
+    const conflict = await peer.inject({ method: 'POST', url: consentPath, headers: peerHeaders, payload: { ...decision, action: 'deny' } });
+    assert.equal(conflict.statusCode, 409);
+    const racePermission = randomUUID();
+    const scopes = await Promise.all(['Scope one', 'Scope two'].map(purpose => peer.inject({ method: 'POST', url: consentPath, headers: peerHeaders, payload: { ...decision, permissionId: racePermission, activationRequestId: randomUUID(), purpose } })));
+    assert.deepEqual(scopes.map(r => r.statusCode).sort(), [202, 409]);
+  } finally { await peer.close(); }
+  const atomicPool = createPool();
+  try {
+    assert.equal(Number((await atomicPool.query('SELECT count(*) AS n FROM consent_events WHERE activation_request_id=$1', [decision.activationRequestId])).rows[0].n), 1);
+    assert.equal(Number((await atomicPool.query("SELECT count(*) AS n FROM audit_events WHERE action='consumer.consent.grant' AND target_id=$1", [permissionId])).rows[0].n), 1);
+    const failedRequest = randomUUID();
+    const failedEvent = { id: randomUUID(), deviceId, subjectId: collectorSubject, ...decision, activationRequestId: failedRequest, occurredAt: new Date().toISOString(), correlationId: randomUUID(), activationId: randomUUID() };
+    await assert.rejects(store!.recordConsumerConsent(failedEvent, { id: randomUUID(), actorId: account.json().account.subject_id, action: 'synthetic-failure', targetType: 'permission', targetId: 'invalid-uuid', outcome: 'accepted', occurredAt: failedEvent.occurredAt, correlationId: failedEvent.correlationId, metadata: {} }));
+    assert.equal(await store!.consentByActivationRequest(deviceId, failedRequest), null, 'audit failure must roll back consent');
+  } finally { await atomicPool.end(); }
   const batch = () => ({ batchId: randomUUID(), schemaVersion: '2026-08-01', observations: [{ eventId: randomUUID(), occurredAt: new Date().toISOString(), sourceApp: 'com.synthetic.app', attribution: 'verified', destinationHost: 'google-analytics.com', protocol: 'tls', bytesBucket: '1-10KB', classification: 'expected', consentId: activationId, consentPurpose: decision.purpose }] });
   const collectorHeaders = { authorization: 'Bearer ' + token };
   const acceptedBatch = batch();

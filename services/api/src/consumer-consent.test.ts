@@ -30,6 +30,28 @@ async function setup() {
   return { app, store, identity, bindings, owner, stranger, subjectId, deviceId, token, permissionId, payload, url };
 }
 
+test('simultaneous account consent retries record exactly one decision and audit', async t => {
+  const f = await setup(); t.after(() => f.app.close());
+  // Model database latency: all legacy read-before-write requests see no receipt.
+  const read = f.store.consentByActivationRequest.bind(f.store);
+  let arrivals = 0;
+  let release!: () => void;
+  const barrier = new Promise<void>(resolve => { release = resolve; });
+  f.store.consentByActivationRequest = async (...args) => {
+    const prior = await read(...args);
+    if (++arrivals === 12) release();
+    await barrier;
+    return prior;
+  };
+  const results = await Promise.all(Array.from({ length: 12 }, () =>
+    f.app.inject({ method: 'POST', url: f.url, headers: f.owner, payload: f.payload })));
+  assert.equal(results.filter(r => r.statusCode === 202).length, 1);
+  assert.equal(results.filter(r => r.statusCode === 200).length, 11);
+  assert.equal(new Set(results.map(r => r.json().id)).size, 1);
+  assert.equal(f.store.consents.length, 1);
+  assert.equal(f.store.audits.filter(a => a.action === 'consumer.consent.grant').length, 1);
+});
+
 test('account grant uses collector ledger and revocation blocks further ingestion', async t => {
   const f = await setup(); t.after(() => f.app.close());
   const grant = await f.app.inject({ method: 'POST', url: f.url, headers: f.owner, payload: f.payload });

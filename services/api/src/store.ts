@@ -135,6 +135,7 @@ export interface Store {
   findDeviceByTokenHash(hash: string): Promise<Device | null>;
   createDevice(device: Device & { environment: 'staging' | 'production'; appVersion?: string }): Promise<void>;
   appendConsent(event: ConsentEvent): Promise<void>;
+  recordConsumerConsent(event: ConsentEvent, audit: AuditEvent): Promise<ConsumerConsentResult>;
   currentConsent(deviceId: string, subjectId: string, permissionId: string): Promise<ConsentEvent | null>;
   consentByActivationRequest(deviceId: string, activationRequestId: string): Promise<ConsentEvent | null>;
   consentByActivationId(deviceId: string, activationId: string): Promise<ConsentEvent | null>;
@@ -158,6 +159,23 @@ export interface Store {
 
 type MemoryObservation = Observation & { deviceId: string; receivedAt: string };
 
+export type ConsumerConsentResult =
+  | { status: 'accepted' | 'replayed'; event: ConsentEvent }
+  | { status: 'idempotency_conflict' | 'permission_scope_conflict' };
+
+function consentConflict(event: ConsentEvent, prior: ConsentEvent | null, current: ConsentEvent | null) {
+  if (prior && (prior.subjectId !== event.subjectId || prior.permissionId !== event.permissionId ||
+    prior.action !== event.action || prior.purpose !== event.purpose ||
+    prior.policyVersion !== event.policyVersion || prior.purposeVersion !== event.purposeVersion)) {
+    return 'idempotency_conflict' as const;
+  }
+  if (!prior && current && (current.purpose !== event.purpose ||
+    current.policyVersion !== event.policyVersion || current.purposeVersion !== event.purposeVersion)) {
+    return 'permission_scope_conflict' as const;
+  }
+  return null;
+}
+
 export class MemoryStore implements Store {
   devices = new Map<string, Device>();
   consents: ConsentEvent[] = [];
@@ -175,6 +193,21 @@ export class MemoryStore implements Store {
   }
   async createDevice(device: Device) { this.devices.set(device.id, device); }
   async appendConsent(event: ConsentEvent) { this.consents.push(event); }
+  async recordConsumerConsent(event: ConsentEvent, audit: AuditEvent): Promise<ConsumerConsentResult> {
+    // No await between validation and both writes: atomic within this memory store.
+    const prior = [...this.consents].reverse().find(e => e.deviceId === event.deviceId &&
+      e.activationRequestId === event.activationRequestId) ?? null;
+    const current = [...this.consents].reverse().find(e => e.deviceId === event.deviceId &&
+      e.subjectId === event.subjectId && e.permissionId === event.permissionId) ?? null;
+    const conflict = consentConflict(event, prior, current);
+    if (conflict) return { status: conflict };
+    if (prior) return { status: 'replayed', event: prior };
+    const occurredAt = new Date(Math.max(Date.now(), current ? Date.parse(current.occurredAt) + 1 : 0)).toISOString();
+    const saved = { ...event, occurredAt };
+    this.consents.push(saved);
+    this.audits.push({ ...audit, occurredAt });
+    return { status: 'accepted', event: saved };
+  }
   async currentConsent(deviceId: string, subjectId: string, permissionId: string) {
     return [...this.consents].reverse().find(event => event.deviceId === deviceId && event.subjectId === subjectId && event.permissionId === permissionId) ?? null;
   }
@@ -361,8 +394,49 @@ export class PostgresStore implements Store {
       [device.id, device.subjectId, device.tokenHash, device.environment, device.appVersion ?? null, device.vaultId ?? null]);
   }
   async appendConsent(event: ConsentEvent) {
-    await this.pool.query('INSERT INTO consent_events(id,device_id,subject_id,permission_id,action,purpose,policy_version,purpose_version,occurred_at,correlation_id,vault_id,activation_id,activation_vault_id,activation_request_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)',
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', ['consumer-consent:' + event.deviceId]);
+    await client.query('INSERT INTO consent_events(id,device_id,subject_id,permission_id,action,purpose,policy_version,purpose_version,occurred_at,correlation_id,vault_id,activation_id,activation_vault_id,activation_request_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)',
       [event.id, event.deviceId, event.subjectId, event.permissionId, event.action, event.purpose, event.policyVersion, event.purposeVersion, event.occurredAt, event.correlationId, event.vaultId ?? null, event.activationId ?? null, event.activationVaultId ?? null, event.activationRequestId ?? null]);
+      await client.query('COMMIT');
+    } catch (error) { await client.query('ROLLBACK'); throw error; }
+    finally { client.release(); }
+  }
+  async recordConsumerConsent(event: ConsentEvent, audit: AuditEvent): Promise<ConsumerConsentResult> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Shared database lock serializes account decisions across pools/processes.
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', ['consumer-consent:' + event.deviceId]);
+      const priorRow = (await client.query('SELECT * FROM consent_events WHERE device_id=$1 AND activation_request_id=$2 ORDER BY occurred_at DESC LIMIT 1',
+        [event.deviceId, event.activationRequestId])).rows[0];
+      const currentRow = (await client.query('SELECT * FROM consent_events WHERE device_id=$1 AND subject_id=$2 AND permission_id=$3 ORDER BY occurred_at DESC LIMIT 1',
+        [event.deviceId, event.subjectId, event.permissionId])).rows[0];
+      const prior = priorRow ? mapConsent(priorRow) : null;
+      const current = currentRow ? mapConsent(currentRow) : null;
+      const conflict = consentConflict(event, prior, current);
+      if (conflict || prior) {
+        await client.query('COMMIT');
+        return conflict ? { status: conflict } : { status: 'replayed', event: prior! };
+      }
+      // Use database time and advance past the last decision to avoid clock skew/ties.
+      const row = (await client.query(`INSERT INTO consent_events(id,device_id,subject_id,permission_id,action,purpose,policy_version,purpose_version,occurred_at,correlation_id,vault_id,activation_id,activation_vault_id,activation_request_id)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,GREATEST(clock_timestamp(),
+          (SELECT max(occurred_at)+interval '1 microsecond' FROM consent_events WHERE device_id=$2 AND subject_id=$3 AND permission_id=$4)),
+          $9,$10,$11,$12,$13) RETURNING *`,
+        [event.id,event.deviceId,event.subjectId,event.permissionId,event.action,event.purpose,event.policyVersion,event.purposeVersion,
+          event.correlationId,event.vaultId ?? null,event.activationId ?? null,event.activationVaultId ?? null,event.activationRequestId ?? null])).rows[0];
+      const saved = mapConsent(row);
+      await client.query('INSERT INTO audit_events(id,actor_id,action,target_type,target_id,outcome,occurred_at,correlation_id,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+        [audit.id,audit.actorId,audit.action,audit.targetType,audit.targetId,audit.outcome,saved.occurredAt,audit.correlationId,audit.metadata]);
+      await client.query('COMMIT');
+      return { status: 'accepted', event: saved };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
   }
   async currentConsent(deviceId: string, subjectId: string, permissionId: string) {
     const row = (await this.pool.query('SELECT * FROM consent_events WHERE device_id=$1 AND subject_id=$2 AND permission_id=$3 ORDER BY occurred_at DESC LIMIT 1', [deviceId, subjectId, permissionId])).rows[0];

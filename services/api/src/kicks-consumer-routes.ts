@@ -395,21 +395,6 @@ export function registerKicksConsumerRoutes(
     const parsed = consentInput.safeParse(request.body);
     if (!parsed.success) return reply.code(422).send({ error: 'validation_error', request_id: request.id });
     const input = parsed.data;
-    const prior = await store.consentByActivationRequest(deviceId, input.activationRequestId);
-    if (prior) {
-      if (prior.subjectId !== authorized.binding.collector_subject_id ||
-          prior.permissionId !== input.permissionId || prior.action !== input.action ||
-          prior.purpose !== input.purpose || prior.policyVersion !== input.policyVersion ||
-          prior.purposeVersion !== input.purposeVersion) {
-        return reply.code(409).send({ error: 'idempotency_conflict', request_id: request.id });
-      }
-      return reply.code(200).send({ ...consentView(prior), status: 'accepted', replayed: true });
-    }
-    const current = await store.currentConsent(deviceId, authorized.binding.collector_subject_id, input.permissionId);
-    if (current && (current.purpose !== input.purpose || current.policyVersion !== input.policyVersion ||
-        current.purposeVersion !== input.purposeVersion)) {
-      return reply.code(409).send({ error: 'permission_scope_conflict', request_id: request.id });
-    }
     const event: import('./store.js').ConsentEvent = {
       id: randomUUID(),
       deviceId,
@@ -419,15 +404,17 @@ export function registerKicksConsumerRoutes(
       occurredAt: new Date().toISOString(),
       correlationId: request.id,
     };
-    await store.appendConsent(event);
-    await store.appendAudit({
+    const result = await store.recordConsumerConsent(event, {
       id: randomUUID(), actorId: authorized.consumer.subjectId,
       action: `consumer.consent.${input.action}`, targetType: 'permission',
       targetId: input.permissionId, outcome: 'accepted',
       occurredAt: event.occurredAt, correlationId: request.id,
       metadata: { deviceId, consentEventId: event.id, purpose: input.purpose },
     });
-    return reply.code(202).send({ ...consentView(event), status: 'accepted', replayed: false });
+    if (!('event' in result)) {
+      return reply.code(409).send({ error: result.status, request_id: request.id });
+    }
+    return reply.code(result.status === 'replayed' ? 200 : 202).send({ ...consentView(result.event), status: 'accepted', replayed: result.status === 'replayed' });
   });
 
   app.get('/core/consumer/v1/devices', async (request, reply) => {
