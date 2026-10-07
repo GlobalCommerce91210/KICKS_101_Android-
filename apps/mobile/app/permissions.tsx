@@ -56,7 +56,7 @@ export default function Permissions() {
 
       if (appData.length > 0) {
         const currentApp = appData.some(app => app.app_id === selectedAppId)
-          ? selectedAppId : appData[0].app_id;
+          ? selectedAppId : (appData[0]?.app_id ?? selectedAppId);
         setSelectedAppId(currentApp);
         const meta = await permissionsApi.getMetadataPermissions(USER_ID, currentApp);
         setMetadataPerms(meta);
