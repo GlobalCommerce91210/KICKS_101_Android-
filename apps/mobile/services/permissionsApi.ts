@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { getBaseUrl } from './apiConfig';
 
 export type PermissionState = 'allowed' | 'blocked' | 'limited';
 export type MetadataState = 'allowed' | 'blocked' | 'conditional';
@@ -47,13 +47,6 @@ export interface ConsentLogEntry {
   new_state: string;
   context: string;
   timestamp: string;
-}
-
-function getBaseUrl(): string {
-  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
-    return window.location.origin;
-  }
-  return 'http://localhost:3000';
 }
 
 export const permissionsApi = {
