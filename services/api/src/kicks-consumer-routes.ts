@@ -1,4 +1,4 @@
-﻿import { createHash } from 'node:crypto';
+﻿import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { ComplianceEngine } from './compliance.js';
@@ -55,6 +55,8 @@ export function registerKicksConsumerRoutes(
 
     const session = await identityStore.findSessionByAccessToken(token);
     if (!session) return null;
+    const account = await identityStore.findAccountBySubjectId(session.subject_id);
+    if (!account || account.account_status === 'suspended' || account.account_status === 'closed') return null;
 
     const entitlement = await identityStore.getKicksEntitlement(
       session.subject_id,
@@ -344,6 +346,89 @@ export function registerKicksConsumerRoutes(
       },
     };
   };
+
+
+  // Account-authorized decisions use the same ledger enforced by collector ingestion.
+  const consentInput = z.object({
+    permissionId: z.string().uuid(),
+    activationRequestId: z.string().uuid(),
+    action: z.enum(['grant', 'deny', 'revoke']),
+    policyVersion: z.string().min(1).max(64),
+    purposeVersion: z.string().min(1).max(64),
+    purpose: z.string().min(3).max(120),
+  }).strict();
+  const consentQuery = z.object({ permissionId: z.string().uuid() }).strict();
+  const consentView = (event: import('./store.js').ConsentEvent) => ({
+    id: event.id,
+    permissionId: event.permissionId,
+    action: event.action,
+    purpose: event.purpose,
+    policyVersion: event.policyVersion,
+    purposeVersion: event.purposeVersion,
+    activationId: event.activationId ?? null,
+    occurredAt: event.occurredAt,
+  });
+  const accountBinding = async (authorization: string | undefined, deviceId: string) => {
+    const consumer = await authenticateConsumer(authorization);
+    if (!consumer) return null;
+    const bindings = await deviceBindingStore.list(consumer.subjectId);
+    const binding = bindings.find(item => item.device_id === deviceId && item.status === 'active');
+    return { consumer, binding };
+  };
+
+  app.get('/core/consumer/v1/devices/:deviceId/consent', async (request, reply) => {
+    const { deviceId } = request.params as { deviceId: string };
+    const authorized = await accountBinding(request.headers.authorization, deviceId);
+    if (!authorized) return reply.code(401).send({ error: 'unauthorized', request_id: request.id });
+    if (!authorized.binding) return reply.code(404).send({ error: 'device_binding_not_found', request_id: request.id });
+    const parsed = consentQuery.safeParse(request.query);
+    if (!parsed.success) return reply.code(422).send({ error: 'validation_error', request_id: request.id });
+    const event = await store.currentConsent(deviceId, authorized.binding.collector_subject_id, parsed.data.permissionId);
+    return reply.code(200).send({ consent: event ? consentView(event) : null });
+  });
+
+  app.post('/core/consumer/v1/devices/:deviceId/consent', async (request, reply) => {
+    const { deviceId } = request.params as { deviceId: string };
+    const authorized = await accountBinding(request.headers.authorization, deviceId);
+    if (!authorized) return reply.code(401).send({ error: 'unauthorized', request_id: request.id });
+    if (!authorized.binding) return reply.code(404).send({ error: 'device_binding_not_found', request_id: request.id });
+    const parsed = consentInput.safeParse(request.body);
+    if (!parsed.success) return reply.code(422).send({ error: 'validation_error', request_id: request.id });
+    const input = parsed.data;
+    const prior = await store.consentByActivationRequest(deviceId, input.activationRequestId);
+    if (prior) {
+      if (prior.subjectId !== authorized.binding.collector_subject_id ||
+          prior.permissionId !== input.permissionId || prior.action !== input.action ||
+          prior.purpose !== input.purpose || prior.policyVersion !== input.policyVersion ||
+          prior.purposeVersion !== input.purposeVersion) {
+        return reply.code(409).send({ error: 'idempotency_conflict', request_id: request.id });
+      }
+      return reply.code(200).send({ ...consentView(prior), status: 'accepted', replayed: true });
+    }
+    const current = await store.currentConsent(deviceId, authorized.binding.collector_subject_id, input.permissionId);
+    if (current && (current.purpose !== input.purpose || current.policyVersion !== input.policyVersion ||
+        current.purposeVersion !== input.purposeVersion)) {
+      return reply.code(409).send({ error: 'permission_scope_conflict', request_id: request.id });
+    }
+    const event: import('./store.js').ConsentEvent = {
+      id: randomUUID(),
+      deviceId,
+      subjectId: authorized.binding.collector_subject_id,
+      ...input,
+      activationId: input.action === 'grant' ? randomUUID() : null,
+      occurredAt: new Date().toISOString(),
+      correlationId: request.id,
+    };
+    await store.appendConsent(event);
+    await store.appendAudit({
+      id: randomUUID(), actorId: authorized.consumer.subjectId,
+      action: `consumer.consent.${input.action}`, targetType: 'permission',
+      targetId: input.permissionId, outcome: 'accepted',
+      occurredAt: event.occurredAt, correlationId: request.id,
+      metadata: { deviceId, consentEventId: event.id, purpose: input.purpose },
+    });
+    return reply.code(202).send({ ...consentView(event), status: 'accepted', replayed: false });
+  });
 
   app.get('/core/consumer/v1/devices', async (request, reply) => {
     const consumer = await authenticateConsumer(request.headers.authorization);
