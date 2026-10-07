@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   ios-simulator-build:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
 
     defaults:
@@ -35,10 +35,10 @@ jobs:
       - name: Typecheck mobile workspace
         run: npm --workspace @kicks/mobile run typecheck
 
-      - name: Select Xcode 26.2 (Swift 6.2)
+      - name: Select Xcode 26.6 (Expo SDK 57 compatible)
         run: |
           set -euo pipefail
-          sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
           xcodebuild -version
           swift --version
 
