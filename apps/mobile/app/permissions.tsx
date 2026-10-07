@@ -77,15 +77,15 @@ export default function Permissions() {
   }, []);
 
   const handleSelectApp = async (appId: string) => {
+    if (actionInProgress) return;
     setMetadataLoaded(false);
     setSelectedAppId(appId);
-    if (actionInProgress) return;
     setError(null);
     setActionInProgress(true);
     try {
       const meta = await permissionsApi.getMetadataPermissions(USER_ID, appId);
       setMetadataPerms(meta);
-        setMetadataLoaded(true);
+      setMetadataLoaded(true);
     } catch (err) {
       setMetadataPerms([]);
       setError('Permissions for this app could not be loaded. Try again before making changes.');
