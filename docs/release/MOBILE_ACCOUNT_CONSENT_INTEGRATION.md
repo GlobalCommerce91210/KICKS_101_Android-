@@ -14,7 +14,7 @@ This is an in-process memory-store integration test; it does not validate native
 ## Staging gates
 Do not deploy this snapshot to production. Configure an explicit HTTPS EXPO_PUBLIC_API_URL and the four monitoring permission/purpose settings documented in MOBILE_DATASTORM_SESSION_CONSENT.md.
 Without DATABASE_URL (or KICKS_DATABASE_URL), API defaults to memory stores and loses account/binding/consent state on restart.
-The inherited services/api/db/schema.sql is not a standalone migration: metadata_batches references devices before its declaration. Confirm the actual PostgreSQL initialization/migration path, schema compatibility, and restart durability before staging account validation.
+The base schema now creates devices before referencing it. Apply db/migrations/001-account-consent.sql after the base schema as schema owner: it adds the account-bound consent/device columns and permits opaque DataStorm audit actors without changing collector subject IDs. The opt-in postgres-account-consent.test.ts and PostgreSQL 16 CI service validate migration reapplication, account/binding/consent persistence after API restart, refresh rotation, revocation-denied ingestion, and logout. Collector ingestion enrichment and marketplace tables are outside this narrow migration and remain deployment blockers. Review the target database schema and migration permissions before applying; no external database was changed.
 Concurrent consent retry uniqueness still needs durable atomic enforcement. Unlinking a device does not automatically revoke collector credentials or consent.
 No credentials, accounts, deployments, or signing profiles are created by this candidate.
 
