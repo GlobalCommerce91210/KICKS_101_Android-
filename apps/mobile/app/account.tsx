@@ -6,7 +6,7 @@ import { useSession } from '../components/SessionProvider';
 import { SessionError } from '../services/sessionCore';
 
 export default function Account() {
-  const { manager, user, ready, restoreError } = useSession();
+  const { manager, user, ready, restoreError, sessionWarning } = useSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -37,7 +37,10 @@ export default function Account() {
       </Pressable>
       <Text style={ui.body}>Use the DataStorm account you already created. Account creation and recovery are handled by DataStorm.</Text>
     </Card>}
-    {(error || (!user && restoreError)) && <Card><Text accessibilityRole="alert" style={ui.body}>{error ?? restoreError}</Text></Card>}
+    {(error || sessionWarning || (!user && restoreError)) && <Card>
+      <Text accessibilityRole="alert" style={ui.body}>{error ?? sessionWarning ?? restoreError}</Text>
+      {sessionWarning?.startsWith('Secure storage') && <Pressable accessibilityRole="button" disabled={busy} onPress={() => act(() => manager.logout())}><Text style={s.link}>Retry sign out</Text></Pressable>}
+    </Card>}
     {busy && <View><ActivityIndicator color={colors.orange} /></View>}
     <Pressable onPress={() => router.push('/settings')}><Text style={s.link}>Back to Settings</Text></Pressable>
   </Screen>;
@@ -46,4 +49,3 @@ const s = StyleSheet.create({
   input: { color: colors.text, borderWidth: 1, borderColor: '#493a32', borderRadius: 10, padding: 12, fontSize: 16 },
   link: { color: colors.orange, fontSize: 16, fontWeight: '700', paddingVertical: 12 }
 });
-

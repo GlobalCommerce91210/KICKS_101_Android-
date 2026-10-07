@@ -17,6 +17,7 @@ interface SessionContextValue {
   user: AccountUser | null;
   ready: boolean;
   restoreError: string | null;
+  sessionWarning: string | null;
 }
 const SessionContext = createContext<SessionContextValue | null>(null);
 export function SessionProvider({ children }: { children: ReactNode }) {
@@ -27,19 +28,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState(manager.user);
   const [ready, setReady] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [sessionWarning, setSessionWarning] = useState(manager.warning);
   useEffect(() => {
     let live = true;
-    const unsubscribe = manager.subscribe(() => { if (live) setUser(manager.user); });
+    const unsubscribe = manager.subscribe(() => { if (live) { setUser(manager.user); setSessionWarning(manager.warning); } });
     if (!restoreFlight.current) restoreFlight.current = manager.restore();
     restoreFlight.current.catch(() => { if (live) setRestoreError('Your previous session could not be restored. Sign in again.'); })
       .finally(() => { if (live) { setUser(manager.user); setReady(true); } });
     return () => { live = false; unsubscribe(); };
   }, [manager]);
-  return <SessionContext.Provider value={{ manager, user, ready, restoreError }}>{children}</SessionContext.Provider>;
+  return <SessionContext.Provider value={{ manager, user, ready, restoreError, sessionWarning }}>{children}</SessionContext.Provider>;
 }
 export function useSession() {
   const session = useContext(SessionContext);
   if (!session) throw new Error('SessionProvider is required.');
   return session;
 }
-

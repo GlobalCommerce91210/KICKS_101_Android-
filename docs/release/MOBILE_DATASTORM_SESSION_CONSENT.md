@@ -11,7 +11,7 @@ Native session recovery stores only an origin-bound refresh token in Expo Secure
 Web uses volatile memory and intentionally requires sign-in after a page reload. No localStorage token is introduced.
 Startup refreshes the session and checks account/product access again. Expiring concurrent requests share one refresh. A 401 clears the session.
 Sign-out clears local credentials and requests server revocation. If server revocation cannot be confirmed, the app reports that distinction.
-Secure-storage deletion failure is surfaced and must be resolved before treating device sign-out as complete.
+Secure-storage deletion failure remains visible across screens with a retry action and is surfaced and must be resolved before treating device sign-out as complete.
 Session generations prevent late login/restore/refresh responses from restoring a signed-out or switched account.
 No token or password is logged.
 
@@ -48,7 +48,7 @@ Keep the same bundle ID and signing team. Do not uninstall or clear app data.
 iOS extension/forwarding, commercial sharing, study enrollment and payouts remain separate unverified gates.
 
 ## Validation
-Local mobile typecheck, web bundle export and 14 routing/session tests passed before publication.
+Local mobile typecheck, web bundle export and 15 routing/session tests passed before publication.
 Tests cover refresh rotation, entitlement denial, storage failure, environment isolation, refresh deduplication, 401/logout, server sign-out uncertainty, and late login/restore races.
 Native simulator validation and CI are recorded on the PR. Passing pure session tests does not prove Keychain behavior or a physical-device account journey.
 

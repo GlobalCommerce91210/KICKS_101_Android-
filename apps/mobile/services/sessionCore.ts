@@ -3,6 +3,7 @@ export interface SessionStorage { read(): Promise<string | null>; write(value: s
 export class SessionError extends Error {}
 export class SessionManager {
   user: AccountUser | null = null;
+  warning: string | null = null;
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
   private expiresAt = 0;
@@ -68,6 +69,7 @@ export class SessionManager {
   async login(email: string, password: string) {
     const epoch = ++this.epoch;
     this.refreshFlight = null;
+    this.warning = null;
     this.user = null; this.accessToken = null; this.refreshToken = null; this.emit();
     await this.persist(() => this.storage.clear());
     const response = await this.send('/core/identity/v1/session', {
@@ -134,6 +136,7 @@ export class SessionManager {
   async logout() {
     ++this.epoch;
     this.refreshFlight = null;
+    this.warning = null;
     const token = this.accessToken;
     this.user = null; this.accessToken = null; this.refreshToken = null; this.expiresAt = 0; this.emit();
     const clear = this.persist(() => this.storage.clear());
@@ -143,7 +146,13 @@ export class SessionManager {
       if (!response.ok) throw new SessionError('Signed out on this device. Server sign-out could not be confirmed.');
     }).catch(() => { throw new SessionError('Signed out on this device. Server sign-out could not be confirmed.'); }) : Promise.resolve();
     const results = await Promise.allSettled([clear, revoke]);
-    if (results[0]?.status === 'rejected') throw new SessionError('Secure storage could not be cleared. Try signing out again.');
-    if (results[1]?.status === 'rejected') throw results[1].reason;
+    if (results[0]?.status === 'rejected') {
+      this.warning = 'Secure storage could not be cleared. Try signing out again.';
+      this.emit(); throw new SessionError(this.warning);
+    }
+    if (results[1]?.status === 'rejected') {
+      this.warning = 'Signed out on this device. Server sign-out could not be confirmed.';
+      this.emit(); throw new SessionError(this.warning);
+    }
   }
 }

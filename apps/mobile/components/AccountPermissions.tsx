@@ -14,7 +14,7 @@ const purposeVersion = process.env.EXPO_PUBLIC_MONITORING_PURPOSE_VERSION;
 const purpose = process.env.EXPO_PUBLIC_MONITORING_PURPOSE;
 const configured = !!(permissionId && policyVersion && purposeVersion && purpose);
 export function AccountPermissions() {
-  const { manager, user, ready } = useSession();
+  const { manager, user, ready, sessionWarning } = useSession();
   const [devices, setDevices] = useState<Device[]>([]);
   const [deviceId, setDeviceId] = useState('');
   const [consent, setConsent] = useState<Consent | null>(null);
@@ -79,6 +79,7 @@ export function AccountPermissions() {
     <BrandHeader section="Account permissions" />
     <Text style={ui.title}>Your permission comes first.</Text>
     <Text style={ui.body}>Signing in does not start monitoring or authorize commercial data sharing.</Text>
+    {sessionWarning && <Card><Text accessibilityRole="alert" style={ui.body}>{sessionWarning}</Text><Pressable accessibilityRole="button" onPress={() => router.push('/account')}><Text style={ui.label}>REVIEW SIGN-OUT STATUS</Text></Pressable></Card>}
     {!ready ? <ActivityIndicator color={colors.orange} /> : !user ? <Card>
       <Text style={ui.h2}>Connect your DataStorm account</Text>
       <Text style={ui.body}>Sign in to review the devices and permissions linked to your account.</Text>
@@ -107,4 +108,3 @@ export function AccountPermissions() {
     {error && <Card><Text accessibilityRole="alert" style={ui.body}>{error}</Text></Card>}
   </Screen>;
 }
-

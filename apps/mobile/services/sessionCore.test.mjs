@@ -136,3 +136,17 @@ test('rejects requests outside the account API', async () => {
     await f.manager.login('owner@example.test', 'password');
     await assert.rejects(f.manager.request('https://external.example.test'));
 });
+test('secure-storage deletion failure remains visible and can be retried', async () => {
+    const f = fixture();
+    let clears = 0;
+    const storage = { ...f.storage, async clear() { clears++; if (clears === 2) throw new Error('keychain failure'); await f.storage.clear(); } };
+    const manager = new SessionManager(storage, () => 'https://beta.example.test', f.transport);
+    await manager.login('owner@example.test', 'password');
+    await assert.rejects(manager.logout(), /Secure storage/);
+    assert.equal(manager.user, null);
+    assert.match(manager.warning, /Secure storage/);
+    assert.ok(f.saved);
+    await manager.logout();
+    assert.equal(f.saved, null);
+    assert.equal(manager.warning, null);
+});
