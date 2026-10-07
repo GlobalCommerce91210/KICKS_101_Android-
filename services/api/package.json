@@ -7,7 +7,8 @@
     "dev": "tsx watch src/start.ts",
     "start": "tsx src/start.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test src/*.test.ts"
+    "test": "node --import tsx --test src/*.test.ts scripts/*.test.mjs",
+    "check:identity-route": "node scripts/check-identity-route.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
