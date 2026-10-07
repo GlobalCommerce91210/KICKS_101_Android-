@@ -7,7 +7,7 @@ KICK_S_IOS is the historical 0.2.5 iOS workstream and reference source for nativ
 Passing simulator baseline: commit 8cc0975189d0b524b20e5efda196060ac0748b08, Actions ios-validation #15, Xcode 26.6 on macos-26. Subsequent signing configuration changes require their own CI evidence.
 
 ## Signing configuration
-Bundle ID com.datastorm.kicks; documented Expo account datastorm_inc, project kicks-ios, project ID f6728f6f-0a01-4b9c-951e-d09d547b7f9f. Current access/ownership and Apple team remain unverified.
+Bundle ID com.datastorm.kicks; documented Expo account datastorm-inc, project ezekiel-ios, project ID 1d2a0901-41c9-4026-b835-139e785db502. Owner, slug and project ID supplied by the founder from Expo on 2026-10-06; local project:info must verify access. Apple team remains unverified.
 Use KICKS_BUILD_PLATFORM=ios for local EAS configuration commands; EAS_BUILD_PLATFORM=ios selects the same configuration on builders. Android metadata stays unchanged.
 Profiles: ios-simulator (unsigned simulator), ios-device (internal ad hoc, EAS-managed credentials), ios-production (store). No developmentClient flag because expo-dev-client is not installed.
 Do not enable Network Extension, App Group or shared Keychain entitlements for this visual beta: there is no integrated extension target. Collector signing is a separate gate.
