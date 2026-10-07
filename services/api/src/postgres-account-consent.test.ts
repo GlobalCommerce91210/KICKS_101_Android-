@@ -9,7 +9,7 @@ import { PostgresConsumerIdentityStore } from './consumer-identity-postgres.js';
 import { PostgresConsumerDeviceBindingStore } from './consumer-device-bindings.js';
 import { SessionManager } from '../../../apps/mobile/services/sessionCore.js';
 
-test('PostgreSQL retains mobile account, refresh session, collector binding and consent across server restart', { skip: !process.env.KICKS_TEST_DATABASE_URL }, async t => {
+test('PostgreSQL retains mobile account, refresh session, collector binding, consent and accepted metadata across server restart', { skip: !process.env.KICKS_TEST_DATABASE_URL }, async t => {
   const schema = 'test_consent_' + randomUUID().replaceAll('-', '');
   const admin = new Pool({ connectionString: process.env.KICKS_TEST_DATABASE_URL });
   await admin.query('CREATE SCHEMA ' + schema);
@@ -22,6 +22,9 @@ test('PostgreSQL retains mobile account, refresh session, collector binding and 
     const migration = await readFile(new URL('../db/migrations/001-account-consent.sql', import.meta.url), 'utf8');
     await setup.query(migration);
     await setup.query(migration); // compatibility changes can be reapplied safely
+    const collectorMigration = await readFile(new URL('../db/migrations/002-collector-metadata.sql', import.meta.url), 'utf8');
+    await setup.query(collectorMigration);
+    await setup.query(collectorMigration);
   } finally { await setup.end(); }
   let store: PostgresStore;
   let identity: PostgresConsumerIdentityStore;
@@ -67,7 +70,7 @@ test('PostgreSQL retains mobile account, refresh session, collector binding and 
   const { deviceId, token } = device.json();
   const bind = await session.request('/core/consumer/v1/devices', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ device_id: deviceId, device_binding_token: token, platform: 'ios', display_name: 'Synthetic iPad' })
+    body: JSON.stringify({ device_id: deviceId, device_binding_token: token, platform: 'android', display_name: 'Synthetic Android collector' })
   });
   assert.equal(bind.status, 201);
   const devices = await session.request('/core/consumer/v1/devices');
@@ -78,6 +81,13 @@ test('PostgreSQL retains mobile account, refresh session, collector binding and 
   const grant = await session.request(consentPath, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(decision) });
   assert.equal(grant.status, 202);
   const activationId = (await grant.json()).activationId;
+
+  const batch = () => ({ batchId: randomUUID(), schemaVersion: '2026-08-01', observations: [{ eventId: randomUUID(), occurredAt: new Date().toISOString(), sourceApp: 'com.synthetic.app', attribution: 'verified', destinationHost: 'google-analytics.com', protocol: 'tls', bytesBucket: '1-10KB', classification: 'expected', consentId: activationId, consentPurpose: decision.purpose }] });
+  const collectorHeaders = { authorization: 'Bearer ' + token };
+  const acceptedBatch = batch();
+  assert.equal((await app.inject({ method: 'POST', url: '/v1/metadata-batches', headers: collectorHeaders, payload: acceptedBatch })).statusCode, 202);
+  // Duplicate collector retries do not create another observation.
+  assert.equal((await app.inject({ method: 'POST', url: '/v1/metadata-batches', headers: collectorHeaders, payload: acceptedBatch })).statusCode, 409);
   await app.close();
   app = openServer();
   const restored = new SessionManager(storage, () => 'https://staging.example.test', transport);
@@ -85,8 +95,17 @@ test('PostgreSQL retains mobile account, refresh session, collector binding and 
   assert.equal(restored.user?.subjectId, session.user?.subjectId);
   const read = await restored.request(consentPath + '?permissionId=' + permissionId);
   assert.equal((await read.json()).consent.action, 'grant');
-  const batch = () => ({ batchId: randomUUID(), schemaVersion: '2026-08-01', observations: [{ eventId: randomUUID(), occurredAt: new Date().toISOString(), sourceApp: 'com.synthetic.app', attribution: 'verified', destinationHost: 'api.example.test', protocol: 'tls', bytesBucket: '1-10KB', classification: 'expected', consentId: activationId, consentPurpose: decision.purpose }] });
-  const collectorHeaders = { authorization: 'Bearer ' + token };
+  const snapshot = await store!.engineSnapshot(deviceId, collectorSubject, 10);
+  assert.equal(snapshot.metrics.observations, 1);
+  assert.ok(snapshot.observations[0]);
+  assert.equal(snapshot.observations[0].destinationHost, 'google-analytics.com');
+  assert.equal(snapshot.consent.status, 'active');
+  const evidencePool = createPool();
+  try {
+    for (const table of ['app_instances', 'domain_registry', 'domain_registry_evidence', 'domain_registry_observation_history', 'behavior_baselines', 'behavior_baseline_daily', 'behavior_baseline_destinations', 'behavior_baseline_hourly']) {
+      assert.ok(Number((await evidencePool.query('SELECT count(*) AS n FROM ' + table)).rows[0].n) > 0, table);
+    }
+  } finally { await evidencePool.end(); }
   assert.equal((await store!.currentConsent(deviceId, collectorSubject, permissionId))?.activationId, activationId);
   const persistedDevices = await restored.request('/core/consumer/v1/devices');
   assert.equal((await persistedDevices.json()).devices[0].device_id, deviceId);
@@ -94,9 +113,9 @@ test('PostgreSQL retains mobile account, refresh session, collector binding and 
   assert.equal(revoke.status, 202);
   assert.equal((await app.inject({ method: 'POST', url: '/v1/metadata-batches', headers: collectorHeaders, payload: batch() })).statusCode, 403);
   assert.equal((await store!.currentConsent(deviceId, collectorSubject, permissionId))?.action, 'revoke');
+  assert.equal((await store!.engineSnapshot(deviceId, collectorSubject, 10)).metrics.observations, 1);
   await restored.logout();
   assert.equal(saved, null);
   assert.ok(logoutToken);
   assert.equal(await identity!.findSessionByAccessToken(logoutToken!), null);
 });
-
