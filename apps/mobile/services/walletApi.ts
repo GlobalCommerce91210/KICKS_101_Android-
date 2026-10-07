@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { getBaseUrl } from './apiConfig';
 
 export interface WalletAccount {
   wallet_id: string;
@@ -60,13 +60,6 @@ export interface ProgressionState {
     streak_bonus: number;
     trust_bonus: number;
   };
-}
-
-function getBaseUrl(): string {
-  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
-    return window.location.origin;
-  }
-  return 'http://localhost:3000';
 }
 
 export const walletApi = {
