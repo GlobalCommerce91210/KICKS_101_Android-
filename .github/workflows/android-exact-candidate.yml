@@ -1,0 +1,84 @@
+name: android-exact-candidate
+on:
+  push:
+    branches: [validation/android-036b0b51-native]
+    paths: ['.github/workflows/android-exact-candidate.yml']
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CI: '1'
+      KICKS_BUILD_PLATFORM: android
+      NODE_ENV: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 036b0b51af0456ea840e2863ff8a155535b06c5c
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - name: Record exact source and install locked dependencies
+        run: |
+          mkdir -p evidence
+          test "$(git rev-parse HEAD)" = 036b0b51af0456ea840e2863ff8a155535b06c5c
+          git rev-parse HEAD > evidence/source-sha.txt
+          git ls-files -s apps/mobile/android > evidence/tracked-native-files.txt
+          npm ci --include=dev
+      - name: Generate missing Android scaffold and retain candidate native overlays
+        run: |
+          cp -a apps/mobile/android "$RUNNER_TEMP/candidate-android"
+          cd apps/mobile
+          npx expo prebuild --platform android --clean --no-install
+          cp "$RUNNER_TEMP/candidate-android/app/build.gradle" android/app/build.gradle
+          cp -a "$RUNNER_TEMP/candidate-android/app/src/main/." android/app/src/main/
+          cd ../..
+          git diff -- apps/mobile/android apps/mobile/app.json apps/mobile/package.json > evidence/generated-native-diff.patch
+          find apps/mobile/android -type f -not -path '*/.gradle/*' -not -path '*/build/*' -print0 | sort -z | xargs -0 sha256sum > evidence/generated-native-sha256.txt
+          node -e "const fs=require('fs');const s=fs.readFileSync('apps/mobile/android/app/build.gradle','utf8');for(const p of [/applicationId 'com.datastorm.kicks'/,/versionCode 9/,/versionName \"0.2.6\"/])if(!p.test(s))throw Error('Android identity mismatch');"
+      - name: Compile Kotlin and assemble internal validation APK
+        working-directory: apps/mobile/android
+        run: |
+          chmod +x gradlew
+          set -o pipefail
+          ./gradlew :app:compileReleaseKotlin :app:assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a -Pkicks.collectorEnabled=false 2>&1 | tee ../../../evidence/native-build.log
+      - name: Audit merged manifest and preserve APK provenance
+        run: |
+          set -euo pipefail
+          apk=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          cp "$apk" evidence/internal-validation.apk
+          sha256sum evidence/internal-validation.apk > evidence/APK-SHA256.txt
+          tool=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
+          "$tool" dump badging "$apk" > evidence/apk-badging.txt
+          "$tool" dump permissions "$apk" > evidence/apk-permissions.txt
+          signer=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          "$signer" verify --print-certs "$apk" > evidence/apk-signing.txt
+          find apps/mobile/android/app/build/intermediates -name AndroidManifest.xml -path '*release*' -exec cp --parents '{}' evidence/ \;
+          python3 - <<'PY'
+          import pathlib,re,json,os
+          bad=pathlib.Path('evidence/apk-badging.txt').read_text()
+          assert "name='com.datastorm.kicks'" in bad and "versionCode='9'" in bad and "versionName='0.2.6'" in bad
+          source=pathlib.Path('apps/mobile/android/app/src/main/AndroidManifest.xml').read_text()
+          allowed=set(re.findall(r'<uses-permission[^>]*android:name="([^"]+)"',source))
+          actual=set(re.findall(r"uses-permission[^\n]*name='([^']+)'",pathlib.Path('evidence/apk-permissions.txt').read_text()))
+          extra=sorted(actual-allowed)
+          pathlib.Path('evidence/provenance.json').write_text(json.dumps({'source_sha':'036b0b51af0456ea840e2863ff8a155535b06c5c','workflow_sha':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID'],'run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],'package':'com.datastorm.kicks','versionName':'0.2.6','versionCode':9,'collectorEnabled':False,'signing':'generated debug signer; continuity not established','api_configuration':'unset; native fails closed','generated_scaffold':'Expo Android only; tracked native overlays restored','extra_permissions':extra},indent=2))
+          assert not extra, 'Merged permissions need disposition: '+str(extra)
+          PY
+      - name: Upload immutable run evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-036b0b51-native-evidence
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
