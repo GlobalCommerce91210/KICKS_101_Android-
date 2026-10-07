@@ -1,3 +1,4 @@
+import { SessionProvider } from '../components/SessionProvider';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -8,7 +9,7 @@ const icons: Record<string, keyof typeof Ionicons.glyphMap> = {
 
 export default function Layout() {
   return (
-    <Tabs screenOptions={({ route }) => ({
+    <SessionProvider><Tabs screenOptions={({ route }) => ({
       headerShown: false,
       tabBarStyle: { backgroundColor: '#0b0b0d', borderTopColor: '#3a2114', height: 66, paddingTop: 5 },
       tabBarActiveTintColor: '#ff6a00', tabBarInactiveTintColor: '#9c8c82',
@@ -20,6 +21,8 @@ export default function Layout() {
       <Tabs.Screen name="opportunities" options={{ title: 'Opportunities' }} />
       <Tabs.Screen name="wallet" options={{ title: 'Wallet' }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
-    </Tabs>
+      <Tabs.Screen name="account" options={{ href: null, title: 'DataStorm account' }} />
+    </Tabs></SessionProvider>
   );
 }
+
