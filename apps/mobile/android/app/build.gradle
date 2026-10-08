@@ -97,6 +97,7 @@ android {
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
         buildConfigField "boolean", "COLLECTOR_ENABLED", "${findProperty('kicks.collectorEnabled') ?: 'false'}"
+        buildConfigField "boolean", "COLLECTOR_PROVISIONING_ENABLED", "${findProperty('kicks.collectorProvisioningEnabled') ?: 'false'}"
     }
     signingConfigs {
         debug {
@@ -111,9 +112,11 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // Internal CI can intentionally build unsigned. Release/beta signing
+            // is performed separately with the approved continuity signer.
+            if (!(findProperty('kicks.unsignedRelease') ?: 'false').toBoolean()) {
+                signingConfig signingConfigs.debug
+            }
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
