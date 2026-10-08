@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ConsumerResourceScreen } from '../components/ConsumerResourceScreen';
 import {
   ActivityIndicator,
   Pressable,
@@ -23,7 +24,8 @@ const USER_ID = 'user_demo_01';
 
 type Tab = 'apps' | 'metadata' | 'buyers' | 'audit_log';
 
-export default function Permissions() {
+export default function Permissions() { return <ConsumerResourceScreen kind="permissions" />; }
+export function LegacyDemoPermissions() {
   const [activeTab, setActiveTab] = useState<Tab>('apps');
   const [loading, setLoading] = useState(true);
   const [apps, setApps] = useState<AppPermission[]>([]);
@@ -1176,3 +1178,4 @@ const s = StyleSheet.create({
     fontSize: 10
   }
 });
+

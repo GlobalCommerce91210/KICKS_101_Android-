@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert, Linking, NativeModules, Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { BrandHeader, Card, Screen, colors, ui } from '../components/Brand';
 import { BRAND_MANIFEST } from '../constants/branding';
+import { router } from 'expo-router';
 
 export default function Settings() {
   const [monitoring, setMonitoring] = useState(false);
@@ -36,10 +37,7 @@ export default function Settings() {
       </SettingRow>
     </Card>
 
-    <Text style={ui.eyebrow}>DATA RIGHTS</Text>
-    <Action title="Review permissions" detail="See, grant, or withdraw purpose-specific uses" onPress={() => unavailable('Permission history')} />
-    <Action title="Export my data" detail="Receive observations, permissions, and rewards" onPress={() => unavailable('Data export')} />
-    <Action title="Delete account and data" detail="Permanently request deletion from KICK'S systems" danger onPress={() => unavailable('Account deletion')} />
+    <Action title="Profile & account controls" detail="Manage your DataStorm identity, devices, consent, and data rights" onPress={() => router.push('/profile')} />
 
     <Text style={ui.eyebrow}>ABOUT</Text>
     <Card>
@@ -54,3 +52,4 @@ export default function Settings() {
 function SettingRow({title, detail, children}:{title:string;detail:string;children:React.ReactNode}) { return <View style={s.row}><View style={s.flex}><Text style={s.title}>{title}</Text><Text style={s.detail}>{detail}</Text></View>{children}</View>; }
 function Action({title,detail,danger=false,onPress}:{title:string;detail:string;danger?:boolean;onPress:()=>void}) { return <Pressable onPress={onPress}><Card><View style={s.row}><View style={s.flex}><Text style={[s.title,danger&&s.danger]}>{title}</Text><Text style={s.detail}>{detail}</Text></View><Text style={danger?s.danger:s.arrow}>›</Text></View></Card></Pressable>; }
 const s=StyleSheet.create({row:{flexDirection:'row',alignItems:'center',gap:14},flex:{flex:1},title:{color:colors.text,fontSize:16,fontWeight:'800'},detail:{color:colors.muted,fontSize:12,lineHeight:18,marginTop:3},status:{color:colors.orange,fontSize:10,fontWeight:'900',letterSpacing:1,marginTop:5},arrow:{color:colors.blue,fontSize:26},danger:{color:colors.red},link:{color:colors.blue,fontSize:12,fontWeight:'700',marginTop:4}});
+

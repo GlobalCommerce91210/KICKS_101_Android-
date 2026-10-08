@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import { registerAccountRoutes, type DataStormAccountProvider } from './account.js';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
@@ -31,16 +32,17 @@ const hash=(v:string)=>createHash('sha256').update(v).digest('hex');const equal=
 const decision=z.object({permissionId:z.string().uuid(),action:z.enum(['grant','deny','revoke']),policyVersion:z.string().min(1).max(64),purposeVersion:z.string().min(1).max(64),purpose:z.string().min(3).max(120)}).strict();
 const batch=z.object({batchId:z.string().uuid(),schemaVersion:z.literal('2026-08-01'),observations:z.array(observation).min(1).max(250)}).strict();
 
-export function buildServer(options:{store?:Store;adminSecret?:string;intelligenceEngine?:IntelligenceEngine;walletEngine?:WalletEngine;permissionsEngine?:PermissionsEngine}={}){
+export function buildServer(options:{store?:Store;adminSecret?:string;accountProvider?:DataStormAccountProvider;intelligenceEngine?:IntelligenceEngine;walletEngine?:WalletEngine;permissionsEngine?:PermissionsEngine}={}){
   const store=options.store??memoryStore();
   const adminSecret=options.adminSecret??process.env.KICKS_STAGING_ADMIN_SECRET??'';
   const engine = options.intelligenceEngine ?? new IntelligenceEngine();
   const permissionsEngine = options.permissionsEngine ?? new PermissionsEngine(engine);
   const walletEngine = options.walletEngine ?? new WalletEngine(engine, permissionsEngine);
-  const app=Fastify({logger:{redact:['req.headers.authorization','req.headers.x-admin-secret']},genReqId:()=>randomUUID(),bodyLimit:256000});
+  const app=Fastify({logger:{redact:['req.headers.authorization','req.headers.cookie','req.headers.x-admin-secret']},genReqId:()=>randomUUID(),bodyLimit:256000});
   app.register(cors,{origin:true});
   app.addHook('onSend',async(_q,r,p)=>{r.header('cache-control','no-store').header('x-content-type-options','nosniff');return p});
   app.get('/health',async()=>({status:'ok',service:'kicks-api',mode:'staging',collector:'metadata-only'}));
+  registerAccountRoutes(app, options.accountProvider);
 
   const authenticate=(authorization?:string)=>{const[scheme,token]=authorization?.split(' ')??[];if(scheme!=='Bearer'||!token)return null;const tokenHash=hash(token);return[...store.devices.values()].find(d=>!d.revoked&&equal(d.tokenHash,tokenHash))??null};
   app.post('/v1/staging/devices',async(q,r)=>{if(!adminSecret||!equal(hash(String(q.headers['x-admin-secret']??'')),hash(adminSecret)))return r.code(403).send({error:'forbidden'});const parsed=z.object({subjectId:z.string().uuid()}).strict().safeParse(q.body);if(!parsed.success)return r.code(400).send({error:'invalid_request'});const token=randomBytes(32).toString('base64url'),device:Device={id:randomUUID(),subjectId:parsed.data.subjectId,tokenHash:hash(token),revoked:false};store.devices.set(device.id,device);return r.code(201).send({deviceId:device.id,token,tokenType:'Bearer'})});
@@ -271,3 +273,4 @@ app.setNotFoundHandler(async (req, reply) => {
   return reply.send(createReadStream(targetFile));
 });
 return app}
+
