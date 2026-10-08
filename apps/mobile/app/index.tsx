@@ -1,8 +1,10 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { BrandHeader, Card, MascotHero, Screen, colors, ui } from '../components/Brand';
 import { ActivityFeed } from '../components/ActivityFeed';
+import { ConsumerResourceScreen } from '../components/ConsumerResourceScreen';
 
-export default function Activity() {
+export default function Home() { return <ConsumerResourceScreen kind="snapshot" />; }
+export function ActivityDemo() {
   return (
     <Screen>
       <BrandHeader section="Privacy and data-value command center" />
@@ -25,3 +27,4 @@ const s = StyleSheet.create({
   stat: { color: colors.text, fontSize: 26, fontWeight: '900' },
   note: { color: '#786961', fontSize: 11, lineHeight: 17, marginTop: 6 }
 });
+

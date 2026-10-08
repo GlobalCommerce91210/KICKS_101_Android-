@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ConsumerResourceScreen } from '../components/ConsumerResourceScreen';
 import {
   ActivityIndicator,
   Modal,
@@ -22,7 +23,8 @@ const USER_ID = 'user_demo_01';
 
 type Tab = 'ledger' | 'by_app' | 'by_metadata';
 
-export default function Wallet() {
+export default function Wallet() { return <ConsumerResourceScreen kind="wallet" />; }
+export function LegacyDemoWallet() {
   const [activeTab, setActiveTab] = useState<Tab>('ledger');
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<WalletSummary | null>(null);
@@ -1291,3 +1293,4 @@ const s = StyleSheet.create({
     flex: 1
   }
 });
+
