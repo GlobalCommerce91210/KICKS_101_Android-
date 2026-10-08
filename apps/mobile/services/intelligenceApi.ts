@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { getBaseUrl } from './apiConfig';
 
 export type MetadataType =
   | 'behavioral'
@@ -143,13 +143,6 @@ export interface AppIntelligenceSummary {
   persona: PersonaAssignment;
   total_estimated_value: number;
   marketplace_summary: MarketplaceMatchResult;
-}
-
-function getBaseUrl(): string {
-  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
-    return window.location.origin;
-  }
-  return 'http://localhost:3000';
 }
 
 export const api = {

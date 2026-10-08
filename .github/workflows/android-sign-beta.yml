@@ -1,0 +1,107 @@
+name: android-sign-beta
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sign-beta:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      EXPECTED_CERT_SHA256: fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck workspaces
+        run: npm run typecheck
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Compile Android Kotlin
+        run: gradle -p apps/mobile/android :app:compileDebugKotlin
+
+      - name: Build unsigned beta APK
+        run: >-
+          gradle -p apps/mobile/android :app:assembleRelease
+          -Pkicks.unsignedRelease=true
+          -Pkicks.collectorEnabled=true
+          -Pkicks.collectorProvisioningEnabled=true
+          -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+          --max-workers=2 --console=plain
+
+      - name: Materialize historical signing key
+        shell: bash
+        env:
+          KICKS_ANDROID_KEYSTORE_B64: ${{ secrets.KICKS_ANDROID_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          test -n "${KICKS_ANDROID_KEYSTORE_B64:-}"
+          umask 077
+          printf '%s' "$KICKS_ANDROID_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/kicks-release.keystore"
+
+      - name: Sign beta APK
+        shell: bash
+        env:
+          KICKS_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.KICKS_ANDROID_KEYSTORE_PASSWORD }}
+          KICKS_ANDROID_KEY_ALIAS: ${{ secrets.KICKS_ANDROID_KEY_ALIAS }}
+          KICKS_ANDROID_KEY_PASSWORD: ${{ secrets.KICKS_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "${KICKS_ANDROID_KEYSTORE_PASSWORD:-}"
+          test -n "${KICKS_ANDROID_KEY_ALIAS:-}"
+          test -n "${KICKS_ANDROID_KEY_PASSWORD:-}"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          mkdir -p signed-apk
+          "$APKSIGNER" sign             --ks "$RUNNER_TEMP/kicks-release.keystore"             --ks-pass "pass:$KICKS_ANDROID_KEYSTORE_PASSWORD"             --ks-key-alias "$KICKS_ANDROID_KEY_ALIAS"             --key-pass "pass:$KICKS_ANDROID_KEY_PASSWORD"             --out signed-apk/KICKS-0.2.6-beta-signed.apk             apps/mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Verify signer continuity
+        shell: bash
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          "$APKSIGNER" verify --verbose --print-certs signed-apk/KICKS-0.2.6-beta-signed.apk | tee signed-apk/APKSIGNER_VERIFY.txt
+          actual="$("$APKSIGNER" verify --print-certs signed-apk/KICKS-0.2.6-beta-signed.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ':' | tr '[:upper:]' '[:lower:]' | head -n1)"
+          expected="$(printf '%s' "$EXPECTED_CERT_SHA256" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          echo "$actual" > signed-apk/SIGNER_SHA256.txt
+          test "$actual" = "$expected"
+
+      - name: Record signed artifact provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD > signed-apk/SOURCE_COMMIT.txt
+          sha256sum signed-apk/KICKS-0.2.6-beta-signed.apk > signed-apk/SHA256SUMS.txt
+          printf '%s\n'             'Package: com.datastorm.kicks'             'VersionName: 0.2.6'             'VersionCode: 9'             'Signer continuity fingerprint verified against historical installed signer.'             'Keystore/private-key material is never uploaded as an artifact.'             > signed-apk/RELEASE_EVIDENCE.txt
+
+      - name: Remove signing key
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/kicks-release.keystore"
+
+      - name: Upload signed beta artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KICKS-0.2.6-beta-signed-${{ github.run_number }}
+          path: signed-apk/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
