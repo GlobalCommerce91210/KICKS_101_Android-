@@ -83,6 +83,15 @@ export function IosCollectorControls() {
   };
   useEffect(() => {
     mounted.current = true;
+    if (usableNative) {
+      setState('checking');
+      void usableNative.getStatus().then(status => {
+        if (!mounted.current) return;
+        setState(status.connected === true || status.collecting === true ? 'connected_waiting_for_evidence' : 'off');
+      }).catch(() => {
+        if (mounted.current) { setState('stop_unconfirmed'); setError('Existing VPN status could not be confirmed. Check KICK’S VPN in iOS Settings.'); }
+      });
+    }
     return () => { mounted.current = false; };
   }, []);
   useEffect(() => {
@@ -116,7 +125,7 @@ export function IosCollectorControls() {
   return <Card accent>
     <Text style={ui.h2}>Network monitoring</Text>
     <Text accessibilityRole="alert" style={ui.body}>{states[state] ?? 'Checking collector status.'}</Text>
-    <Pressable accessibilityRole="button" disabled={busy} style={{minHeight:44,justifyContent:'center'}} onPress={() => {
+    <Pressable accessibilityRole="button" disabled={busy || state === 'checking'} style={{minHeight:44,justifyContent:'center'}} onPress={() => {
       if (['collecting', 'connected_waiting_for_evidence', 'stop_unconfirmed'].includes(state)) {
         void stop().catch(() => { setState('stop_unconfirmed'); setError('Turn off KICK’S VPN in iOS Settings.'); });
       } else void start();
