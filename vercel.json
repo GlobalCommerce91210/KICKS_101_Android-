@@ -6,8 +6,8 @@
   "cleanUrls": true,
   "rewrites": [
     {
-      "source": "/(.*)",
-      "destination": "/index.html"
+      "source": "/(account|profile|permissions|opportunities|wallet|settings|engine)(/.*)?",
+      "destination": "/index"
     }
   ],
   "installCommand": "npm ci --include=dev --workspaces"
