@@ -1,5 +1,4 @@
 import { Tabs } from 'expo-router';
-import { Platform } from 'react-native';
 import { SessionProvider } from '../components/SessionProvider';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -9,7 +8,7 @@ const icons: Record<string, keyof typeof Ionicons.glyphMap> = {
 };
 
 export default function Layout() {
-  return Platform.OS === 'ios' ? <SessionProvider><MobileTabs /></SessionProvider> : <MobileTabs />;
+  return <SessionProvider><MobileTabs /></SessionProvider>;
 }
 function MobileTabs() {
   return (
@@ -24,7 +23,7 @@ function MobileTabs() {
       <Tabs.Screen name="permissions" options={{ title: 'Permissions' }} />
       <Tabs.Screen name="opportunities" options={{ title: 'Opportunities' }} />
       <Tabs.Screen name="wallet" options={{ title: 'Wallet' }} />
-      <Tabs.Screen name="profile" options={{ title: 'Profile', href: Platform.OS === 'ios' ? '/profile' : null }} />
+      <Tabs.Screen name="profile" options={{ title: 'Profile', href: '/profile' }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
       <Tabs.Screen name="account" options={{ title: 'Account', href: null }} />
     </Tabs>

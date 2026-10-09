@@ -2,7 +2,7 @@ name: ios-operational-validation
 
 on:
   push:
-    branches: ['implementation/ios-operational-beta']
+    branches: ['implementation/ios-operational-beta', 'release/0.2.6-shared-beta-20261009']
   workflow_dispatch:
 
 permissions:

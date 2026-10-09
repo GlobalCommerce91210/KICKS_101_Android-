@@ -107,7 +107,13 @@ export class SessionManager {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ refresh_token: token })
       });
-      if (!response.ok) throw new SessionError('Your session expired. Sign in again.');
+      if (!response.ok) {
+        if ((response.status === 401 || response.status === 403) && epoch === this.epoch) {
+          await this.logout().catch(() => {});
+        }
+        throw new SessionError(response.status === 401 || response.status === 403
+          ? 'Your session expired. Sign in again.' : 'Account service is unavailable. Try again later.');
+      }
       await this.accept(await response.json(), epoch);
     })();
     this.refreshFlight = flight;
@@ -129,6 +135,7 @@ export class SessionManager {
     const epoch = this.epoch;
     try {
       if (Date.now() >= this.expiresAt - 30000) await this.refresh(epoch);
+      if (epoch !== this.epoch || !this.user || !this.accessToken) throw new SessionError('Sign in again.');
       const token = this.accessToken;
       const headers = new Headers(init.headers);
       headers.set('authorization', 'Bearer ' + token);

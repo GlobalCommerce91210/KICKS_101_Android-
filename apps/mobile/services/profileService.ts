@@ -78,6 +78,8 @@ export async function loadConsumerProfile(manager: SessionManager): Promise<Cons
   const consentLog = Array.isArray(consent) ? consent : Array.isArray(consent?.items) ? consent.items : [];
   const monitoring = snapshot?.monitoring && typeof snapshot.monitoring === 'object' ? snapshot.monitoring : null;
 
+  if (manager.user !== user) throw new SessionError('Your session changed. Sign in again.');
+
   return {
     account: {
       subjectId: user.subjectId,

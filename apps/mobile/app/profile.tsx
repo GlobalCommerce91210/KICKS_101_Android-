@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { BrandHeader, Card, Screen, colors, ui } from '../components/Brand';
 import { useSession } from '../components/SessionProvider';
@@ -18,36 +18,43 @@ function statusText(value: unknown): string {
 }
 
 export default function Profile() {
-  return Platform.OS === 'ios' ? <IosProfile /> : (
-    <Screen><BrandHeader section="Consumer profile" /><Text style={ui.body}>Profile hydration is currently staged for the iOS operational beta. Android remains unchanged.</Text></Screen>
-  );
+  return <ConsumerProfile />;
 }
 
-function IosProfile() {
+function ConsumerProfile() {
   const { manager, user, ready } = useSession();
-  const [profile, setProfile] = useState<ConsumerProfileView | null>(null);
+  const [loadedProfile, setProfile] = useState<ConsumerProfileView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const requestId = useRef(0);
+  const profile = loadedProfile?.account.subjectId === user?.subjectId ? loadedProfile : null;
   const refresh = useCallback(async () => {
     if (!manager.user) return;
-    setLoading(true); setError(null);
-    try { setProfile(await loadConsumerProfile(manager)); }
+    const id = ++requestId.current;
+    const account = manager.user;
+    setLoading(true); setError(null); setProfile(null);
+    try {
+      const next = await loadConsumerProfile(manager);
+      if (id === requestId.current && manager.user === account) setProfile(next);
+    }
     catch (failure) {
-      if (!manager.user) return;
-      setError(failure instanceof Error ? failure.message : 'Profile is unavailable. Try again.');
-    } finally { setLoading(false); }
+      if (id !== requestId.current || manager.user !== account) return;
+      setError('Profile could not be loaded. Check your connection and try again.');
+    } finally { if (id === requestId.current) setLoading(false); }
   }, [manager]);
 
   useEffect(() => {
+    setProfile(null); setError(null);
     if (ready && !user) router.replace('/account');
   }, [ready, user]);
 
   useFocusEffect(useCallback(() => {
     if (ready && user) void refresh();
-    return () => {};
+    return () => { ++requestId.current; };
   }, [ready, user, refresh]));
 
+  if (ready && !user) return null;
   if (!ready || (loading && !profile)) {
     return <Screen><BrandHeader section="Consumer profile" /><Card><ActivityIndicator color={colors.orange} /><Text style={ui.body}>Loading your DataStorm account…</Text></Card></Screen>;
   }
@@ -60,7 +67,7 @@ function IosProfile() {
 
   return <Screen>
     <BrandHeader section="DataStorm consumer profile" />
-    <Text style={ui.title}>One account. One identity spine.</Text>
+    <Text style={ui.title}>Your account. Your choices.</Text>
     <Text style={ui.body}>KICK’S uses your verified DataStorm consumer identity. Devices and collector identities remain separate and can be revoked independently.</Text>
 
     {error && <Card><Text accessibilityRole="alert" style={s.error}>{error}</Text><Pressable onPress={refresh}><Text style={s.link}>Try again</Text></Pressable></Card>}
@@ -84,7 +91,7 @@ function IosProfile() {
 
     <Card>
       <Text style={ui.eyebrow}>DEVICES</Text>
-      <Row label="Connected devices" value={profile?.devices.length ?? 0} />
+      <Row label="Connected devices" value={profile && !profile.unavailable.includes('connected devices') ? profile.devices.length : '—'} />
       <Text style={ui.body}>Device and collector IDs are operational identities. They do not replace your DataStorm consumer account.</Text>
       {profile?.devices.slice(0, 4).map((device: any, index) =>
         <View key={String(device.device_id ?? device.id ?? index)} style={s.device}>
@@ -98,7 +105,7 @@ function IosProfile() {
       <Text style={ui.eyebrow}>PERMISSIONS & CONSENT</Text>
       <Row label="Permission records" value={activePermissions ?? '—'} />
       <Row label="Revoked" value={revoked ?? '—'} />
-      <Row label="Recent consent events" value={profile?.consentLog.length ?? 0} />
+      <Row label="Recent consent events" value={profile && !profile.unavailable.includes('consent history') ? profile.consentLog.length : '—'} />
       <Pressable onPress={() => router.push('/permissions')}><Text style={s.link}>Review permissions</Text></Pressable>
     </Card>
 

@@ -38,6 +38,10 @@ export default function Settings() {
       </SettingRow>
     </Card>
 
+    <Text style={ui.eyebrow}>DATASTORM ACCOUNT</Text>
+    <Action title="My account" detail="Sign in, restore your session, or sign out" onPress={() => router.push('/account')} />
+    <Action title="My profile" detail="Review your account, devices, consent, and wallet" onPress={() => router.push('/profile')} />
+
     <Text style={ui.eyebrow}>DATA RIGHTS</Text>
     <Action title="Review permissions" detail="See, grant, or withdraw purpose-specific uses" onPress={() => Platform.OS === 'ios' ? router.push('/permissions') : unavailable('Permission history')} />
     <Action title="Export my data" detail="Receive observations, permissions, and rewards" onPress={() => unavailable('Data export')} />
