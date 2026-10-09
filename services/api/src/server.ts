@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import { registerIosBetaRoutes } from './ios-beta.mjs';
 import cors from '@fastify/cors';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createReadStream, existsSync, statSync } from 'node:fs';
@@ -39,6 +40,7 @@ export function buildServer(options:{store?:Store;adminSecret?:string;intelligen
   const walletEngine = options.walletEngine ?? new WalletEngine(engine, permissionsEngine);
   const app=Fastify({logger:{redact:['req.headers.authorization','req.headers.x-admin-secret']},genReqId:()=>randomUUID(),bodyLimit:256000});
   app.register(cors,{origin:true});
+  registerIosBetaRoutes(app);
   app.addHook('onSend',async(_q,r,p)=>{r.header('cache-control','no-store').header('x-content-type-options','nosniff');return p});
   app.get('/health',async()=>({status:'ok',service:'kicks-api',mode:'staging',collector:'metadata-only'}));
 
@@ -271,3 +273,4 @@ app.setNotFoundHandler(async (req, reply) => {
   return reply.send(createReadStream(targetFile));
 });
 return app}
+
