@@ -1,4 +1,4 @@
-import { SessionError, SessionManager } from './sessionCore';
+import { SessionError, SessionManager } from './sessionCore.ts';
 
 type JsonObject = Record<string, any>;
 
