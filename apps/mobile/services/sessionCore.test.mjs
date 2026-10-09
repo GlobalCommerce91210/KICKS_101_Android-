@@ -150,3 +150,15 @@ test('secure-storage deletion failure remains visible and can be retried', async
     assert.equal(f.saved, null);
     assert.equal(manager.warning, null);
 });
+
+test('rejected refresh clears identity even before the old access token expires', async () => {
+  const f = fixture({ expired: true });
+  const transport = async (url, init) => String(url).endsWith('/session/refresh')
+    ? Response.json({ error: 'revoked' }, { status: 401 }) : f.transport(url, init);
+  const manager = new SessionManager(f.storage, () => 'https://beta.example.test', transport);
+  await manager.login('owner@example.test', 'password');
+  await assert.rejects(manager.request('/core/consumer/v1/devices'), /expired/);
+  assert.equal(manager.user, null);
+  assert.equal(f.saved, null);
+  assert.ok(!f.calls.some(call => call.path === '/core/consumer/v1/devices'));
+});

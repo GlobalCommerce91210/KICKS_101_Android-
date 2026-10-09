@@ -1,14 +1,14 @@
 import { useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import { BrandHeader, Card, Screen, colors, ui } from '../components/Brand';
 import { useSession } from '../components/SessionProvider';
 import { SessionError } from '../services/sessionCore';
 
 export default function Account() {
-  return Platform.OS === 'ios' ? <IosAccount /> : <Screen><Text style={ui.body}>This account route is for the iOS candidate.</Text></Screen>;
+  return <ConsumerAccount />;
 }
-function IosAccount() {
+function ConsumerAccount() {
   const { manager, user, ready, restoreError, sessionWarning } = useSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -36,7 +36,7 @@ function IosAccount() {
       <TextInput accessibilityLabel="Email" style={s.input} value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} autoComplete="email" editable={!busy} placeholder="Your email" placeholderTextColor={colors.muted} />
       <Text style={ui.label}>PASSWORD</Text>
       <TextInput accessibilityLabel="Password" style={s.input} value={password} onChangeText={setPassword} secureTextEntry autoCapitalize="none" autoCorrect={false} autoComplete="current-password" editable={!busy} placeholder="Your password" placeholderTextColor={colors.muted} />
-      <Pressable accessibilityRole="button" disabled={busy || !email.trim() || !password} onPress={() => act(() => manager.login(email, password))}>
+      <Pressable accessibilityRole="button" disabled={busy || !email.trim() || !password} onPress={() => act(() => manager.login(email, password).then(() => { router.replace('/profile'); }))}>
         <Text style={s.link}>{busy ? 'Signing in…' : 'Sign in'}</Text>
       </Pressable>
       <Text style={ui.body}>Use the DataStorm account you already created. Account creation and recovery are handled by DataStorm.</Text>

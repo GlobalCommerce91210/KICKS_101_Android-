@@ -1,15 +1,17 @@
-// Keep Android metadata unchanged; reuse the existing iOS EAS project.
+// Preserve platform metadata and reuse the existing iOS EAS project.
 module.exports = ({ config }) => {
-  if (process.env.EAS_BUILD_PLATFORM !== 'ios' && process.env.KICKS_BUILD_PLATFORM !== 'ios') return config;
-  return {
+  const nativeConfig = {
     ...config,
+    plugins: [...new Set([...(config.plugins ?? []), 'expo-secure-store'])],
+  };
+  if (process.env.EAS_BUILD_PLATFORM !== 'ios' && process.env.KICKS_BUILD_PLATFORM !== 'ios') return nativeConfig;
+  return {
+    ...nativeConfig,
     slug: 'ezekiel-ios',
     owner: 'datastorm-inc',
-    plugins: [...(config.plugins ?? []), 'expo-secure-store'],
     extra: {
       ...config.extra,
       eas: { projectId: '1d2a0901-41c9-4026-b835-139e785db502' },
     },
   };
 };
-

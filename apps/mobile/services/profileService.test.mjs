@@ -60,3 +60,17 @@ test('marks optional staging sources unavailable without fabricating live data',
   assert.ok(view.unavailable.includes('wallet'));
   assert.ok(view.unavailable.includes('consumer snapshot'));
 });
+
+test('does not publish hydrated data after the session changes during resource reads', async () => {
+  const user = { subjectId: 'ds-sub', email: 'owner@example.test' };
+  const manager = {
+    user,
+    async request(path) {
+      if (path.endsWith('/account')) return response({ subject_id: 'ds-sub' });
+      if (path.endsWith('/products/kicks')) return response({ profile: { subject_id: 'ds-sub' } });
+      manager.user = { subjectId: 'new-sub', email: 'other@example.test' };
+      return response({});
+    }
+  };
+  await assert.rejects(loadConsumerProfile(manager), /session changed/i);
+});

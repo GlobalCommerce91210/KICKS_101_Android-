@@ -3,7 +3,13 @@ import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { SessionManager, type AccountUser, type SessionStorage } from '../services/sessionCore';
 import { requireIosApiOrigin } from '../services/iosApiOrigin';
-const getBaseUrl = () => requireIosApiOrigin(process.env.EXPO_PUBLIC_IOS_API_URL);
+const getBaseUrl = () => {
+  try {
+    return requireIosApiOrigin(Platform.OS === 'ios'
+      ? process.env.EXPO_PUBLIC_IOS_API_URL ?? process.env.EXPO_PUBLIC_API_URL
+      : process.env.EXPO_PUBLIC_API_URL);
+  } catch { throw new Error('Account service is unavailable. Try again later.'); }
+};
 
 const storageKey = 'datastorm.consumer.session.v1';
 let webMemory: string | null = null;
