@@ -5,9 +5,11 @@ module.exports = ({ config }) => {
     ...config,
     slug: 'ezekiel-ios',
     owner: 'datastorm-inc',
+    plugins: [...(config.plugins ?? []), 'expo-secure-store'],
     extra: {
       ...config.extra,
       eas: { projectId: '1d2a0901-41c9-4026-b835-139e785db502' },
     },
   };
 };
+
