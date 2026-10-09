@@ -79,6 +79,18 @@ export class SessionManager {
     if (!response.ok) throw new SessionError(response.status === 401 ? 'Email or password was not accepted.' : 'Sign-in is unavailable. Try again later.');
     await this.accept(await response.json(), epoch);
   }
+  async createAccount(input: { email: string; password: string; termsVersion: string; privacyVersion: string; idempotencyKey: string }) {
+    if (this.user) throw new SessionError('Sign out before creating another account.');
+    if (!input.termsVersion || !input.privacyVersion || input.idempotencyKey.length < 16) throw new SessionError('Account creation is not configured.');
+    const response = await this.send('/core/identity/v1/account', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': input.idempotencyKey },
+      body: JSON.stringify({ email: input.email.trim(), password: input.password, terms_version: input.termsVersion, privacy_version: input.privacyVersion, marketing_opt_in: false })
+    });
+    if (!response.ok) throw new SessionError(response.status === 409 ? 'An account already exists or this request changed. Sign in or retry.' : 'Account creation is unavailable. Try again later.');
+    const result = await response.json();
+    if (typeof result.account?.subject_id !== 'string' || result.account.email !== input.email.trim().toLowerCase()) throw new SessionError('The account response could not be verified.');
+    // Creation does not establish a session or authorize monitoring.
+  }
   async restore() {
     const epoch = this.epoch;
     const saved = await this.storage.read();
@@ -156,3 +168,4 @@ export class SessionManager {
     }
   }
 }
+

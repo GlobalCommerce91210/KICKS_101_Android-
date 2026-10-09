@@ -4,5 +4,11 @@
   "outputDirectory": "apps/mobile/dist",
   "framework": null,
   "cleanUrls": true,
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "installCommand": "npm ci --include=dev --workspaces"
 }

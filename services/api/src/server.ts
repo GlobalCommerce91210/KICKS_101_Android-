@@ -1,7 +1,8 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
+import { resolveStaticAsset } from './staticAssets.js';
 import { extname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { endpointBySignatureId } from './endpoint-intelligence.js';
@@ -1055,9 +1056,8 @@ export function buildServer(options: {
     ];
     const staticDir = staticDirs.find(directory => existsSync(join(directory, 'index.html')));
     if (!staticDir) return reply.code(404).send({ error: 'not_found' });
-    const cleanPath = request.url.split('?')[0]?.replace(/^\/+/, '') ?? '';
-    const candidate = join(staticDir, cleanPath);
-    const targetFile = cleanPath && existsSync(candidate) && statSync(candidate).isFile() ? candidate : join(staticDir, 'index.html');
+    const targetFile = resolveStaticAsset(staticDir, request.url);
+    if (!targetFile) return reply.code(404).send({ error: 'not_found' });
     reply.type(MIME_TYPES[extname(targetFile).toLowerCase()] ?? 'application/octet-stream');
     return reply.send(createReadStream(targetFile));
   });
@@ -1093,3 +1093,4 @@ function resolveProductionReadiness(overrides?: Partial<ProductionReadiness>): P
   };
   return { ...environmentFlags, ...overrides };
 }
+
