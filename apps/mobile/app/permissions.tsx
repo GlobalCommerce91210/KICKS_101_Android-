@@ -1,6 +1,8 @@
+import { AccountPermissions } from '../components/AccountPermissions';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -24,6 +26,9 @@ const USER_ID = 'user_demo_01';
 type Tab = 'apps' | 'metadata' | 'buyers' | 'audit_log';
 
 export default function Permissions() {
+  return Platform.OS === 'ios' ? <AccountPermissions /> : <LegacyPermissions />;
+}
+function LegacyPermissions() {
   const [activeTab, setActiveTab] = useState<Tab>('apps');
   const [loading, setLoading] = useState(true);
   const [apps, setApps] = useState<AppPermission[]>([]);
@@ -1176,3 +1181,4 @@ const s = StyleSheet.create({
     fontSize: 10
   }
 });
+

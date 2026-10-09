@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { requireIosApiOrigin } from './iosApiOrigin';
 
 export type PermissionState = 'allowed' | 'blocked' | 'limited';
 export type MetadataState = 'allowed' | 'blocked' | 'conditional';
@@ -50,6 +51,7 @@ export interface ConsentLogEntry {
 }
 
 function getBaseUrl(): string {
+  if (Platform.OS === 'ios') return requireIosApiOrigin(process.env.EXPO_PUBLIC_IOS_API_URL);
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
     return window.location.origin;
   }
@@ -138,3 +140,4 @@ export const permissionsApi = {
     return res.json();
   }
 };
+

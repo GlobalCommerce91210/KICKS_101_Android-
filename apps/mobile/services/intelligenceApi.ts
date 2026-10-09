@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { requireIosApiOrigin } from './iosApiOrigin';
 
 export type MetadataType =
   | 'behavioral'
@@ -146,6 +147,7 @@ export interface AppIntelligenceSummary {
 }
 
 function getBaseUrl(): string {
+  if (Platform.OS === 'ios') return requireIosApiOrigin(process.env.EXPO_PUBLIC_IOS_API_URL);
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
     return window.location.origin;
   }
@@ -207,3 +209,4 @@ export const api = {
     return res.json();
   }
 };
+

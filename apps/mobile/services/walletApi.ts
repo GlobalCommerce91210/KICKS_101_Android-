@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { requireIosApiOrigin } from './iosApiOrigin';
 
 export interface WalletAccount {
   wallet_id: string;
@@ -63,6 +64,7 @@ export interface ProgressionState {
 }
 
 function getBaseUrl(): string {
+  if (Platform.OS === 'ios') return requireIosApiOrigin(process.env.EXPO_PUBLIC_IOS_API_URL);
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
     return window.location.origin;
   }
@@ -137,3 +139,4 @@ export const walletApi = {
     return res.json();
   }
 };
+

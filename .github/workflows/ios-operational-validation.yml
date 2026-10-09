@@ -1,0 +1,71 @@
+name: ios-operational-validation
+
+on:
+  push:
+    branches: ['implementation/ios-operational-beta']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  account-consent-boundaries:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Account-session, origin, enrollment and gateway boundaries
+        run: node --test apps/mobile/services/sessionCore.test.mjs apps/mobile/services/iosApiOrigin.test.cjs apps/mobile/services/iosCollectorActivation.test.mjs services/api/src/ios-beta.test.mjs infrastructure/ios-gateway/render-config.test.mjs
+      - name: API regression tests
+        # The API includes a static-root regression; export web before testing it.
+        # This is a web prerequisite, not native iOS validation.
+        run: npm run build && npm --workspace @kicks/api test
+        env:
+          NODE_ENV: test
+  native-simulator:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      KICKS_BUILD_PLATFORM: ios
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm --workspace @kicks/mobile run typecheck
+      - run: sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+      - name: Generate native iOS project
+        working-directory: apps/mobile
+        run: npx expo prebuild --platform ios --clean --no-install
+      - name: Install native dependencies
+        working-directory: apps/mobile/ios
+        run: pod install
+      - name: Compile exact candidate for simulator
+        working-directory: apps/mobile
+        run: |
+          set -euo pipefail
+          workspace="$(find ios -maxdepth 1 -name '*.xcworkspace' | head -n 1)"
+          test -n "$workspace"
+          scheme="$(xcodebuild -list -json -workspace "$workspace" | python3 -c 'import json,sys; print(json.load(sys.stdin)["workspace"]["schemes"][0])')"
+          xcodebuild -workspace "$workspace" -scheme "$scheme" -sdk iphonesimulator -configuration Debug -derivedDataPath ../../ios-derived-data CODE_SIGNING_ALLOWED=NO build
+      - name: Record provenance
+        if: always()
+        run: |
+          mkdir -p ios-operational-evidence
+          git rev-parse HEAD > ios-operational-evidence/SOURCE_COMMIT.txt
+          xcodebuild -version > ios-operational-evidence/XCODE_VERSION.txt
+          find apps/mobile/ios -name '*.entitlements' -o -name 'Podfile.lock' -o -name 'project.pbxproj' > ios-operational-evidence/GENERATED_FILES.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-operational-evidence-${{ github.sha }}
+          path: ios-operational-evidence/
+          retention-days: 14
