@@ -113,9 +113,19 @@ export class SessionManager {
     this.refreshFlight = flight;
     try { await flight; } finally { if (this.refreshFlight === flight) this.refreshFlight = null; }
   }
+  private isAllowedAccountPath(path: string) {
+    if (path.startsWith('//')) return false;
+    if (path.startsWith('/core/')) return true;
+    if (!this.user) return false;
+    const subject = encodeURIComponent(this.user.subjectId);
+    return path === '/v1/me/consumer-state' ||
+      path === `/v1/permissions/users/${subject}/effective` ||
+      path.startsWith(`/v1/permissions/users/${subject}/consent-log?`) ||
+      path === `/v1/wallet/${subject}`;
+  }
   async request(path: string, init: RequestInit = {}) {
-    if (!path.startsWith('/core/') || path.startsWith('//')) throw new SessionError('Unsupported account request.');
     if (!this.user) throw new SessionError('Sign in to continue.');
+    if (!this.isAllowedAccountPath(path)) throw new SessionError('Unsupported account request.');
     const epoch = this.epoch;
     try {
       if (Date.now() >= this.expiresAt - 30000) await this.refresh(epoch);

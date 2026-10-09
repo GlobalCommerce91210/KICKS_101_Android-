@@ -27,6 +27,7 @@ function IosAccount() {
     <Text style={ui.body}>Use your existing DataStorm account to access KICK’S. Signing in does not authorize monitoring or data sharing.</Text>
     {!ready ? <Card><ActivityIndicator color={colors.orange} /><Text style={ui.body}>Checking your session…</Text></Card> : user ? <Card>
       <Text style={ui.h2}>Signed in</Text><Text style={ui.body}>{user.email}</Text>
+      <Pressable disabled={busy} onPress={() => router.replace('/profile')}><Text style={s.link}>Open my profile</Text></Pressable>
       <Pressable disabled={busy} onPress={() => router.push('/permissions')}><Text style={s.link}>Review permissions</Text></Pressable>
       <Pressable disabled={busy} onPress={() => act(() => manager.logout())}><Text style={s.link}>Sign out</Text></Pressable>
     </Card> : <Card>
