@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 const icons: Record<string, keyof typeof Ionicons.glyphMap> = {
   index: 'home-outline', engine: 'scan-outline', permissions: 'shield-checkmark-outline',
-  opportunities: 'briefcase-outline', wallet: 'wallet-outline', settings: 'settings-outline'
+  opportunities: 'briefcase-outline', wallet: 'wallet-outline', settings: 'settings-outline', profile: 'person-circle-outline'
 };
 
 export default function Layout() {
@@ -24,8 +24,9 @@ function MobileTabs() {
       <Tabs.Screen name="permissions" options={{ title: 'Permissions' }} />
       <Tabs.Screen name="opportunities" options={{ title: 'Opportunities' }} />
       <Tabs.Screen name="wallet" options={{ title: 'Wallet' }} />
+      <Tabs.Screen name="profile" options={{ title: 'Profile', href: Platform.OS === 'ios' ? '/profile' : null }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
-      <Tabs.Screen name="account" options={{ title: 'Account', href: Platform.OS === 'ios' ? '/account' : null }} />
+      <Tabs.Screen name="account" options={{ title: 'Account', href: null }} />
     </Tabs>
   );
 }
