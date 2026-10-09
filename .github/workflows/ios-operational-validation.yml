@@ -21,9 +21,11 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - name: Account-session, origin, enrollment and gateway boundaries
-        run: node --test apps/mobile/services/sessionCore.test.mjs apps/mobile/services/iosApiOrigin.test.cjs services/api/src/ios-beta.test.mjs infrastructure/ios-gateway/render-config.test.mjs
+        run: node --test apps/mobile/services/sessionCore.test.mjs apps/mobile/services/iosApiOrigin.test.cjs apps/mobile/services/iosCollectorActivation.test.mjs services/api/src/ios-beta.test.mjs infrastructure/ios-gateway/render-config.test.mjs
       - name: API regression tests
-        run: npm --workspace @kicks/api test
+        # The API includes a static-root regression; export web before testing it.
+        # This is a web prerequisite, not native iOS validation.
+        run: npm run build && npm --workspace @kicks/api test
         env:
           NODE_ENV: test
   native-simulator:
