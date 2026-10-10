@@ -1,6 +1,8 @@
 name: ios-operational-validation
 
 on:
+  pull_request:
+    branches: ['release/0.2.6-shared-beta-20261009']
   push:
     branches: ['implementation/ios-operational-beta', 'release/0.2.6-shared-beta-20261009']
   workflow_dispatch:
@@ -54,7 +56,10 @@ jobs:
           set -euo pipefail
           workspace="$(find ios -maxdepth 1 -name '*.xcworkspace' | head -n 1)"
           test -n "$workspace"
-          scheme="$(xcodebuild -list -json -workspace "$workspace" | python3 -c 'import json,sys; print(json.load(sys.stdin)["workspace"]["schemes"][0])')"
+          # Build the containing app, never the first CocoaPods dependency scheme.
+          scheme="$(basename "$workspace" .xcworkspace)"
+          xcodebuild -list -json -workspace "$workspace" |
+            python3 -c 'import json,sys; assert sys.argv[1] in json.load(sys.stdin)["workspace"]["schemes"], "App scheme missing"' "$scheme"
           xcodebuild -workspace "$workspace" -scheme "$scheme" -sdk iphonesimulator -configuration Debug -derivedDataPath ../../ios-derived-data CODE_SIGNING_ALLOWED=NO build
       - name: Record provenance
         if: always()
@@ -69,3 +74,17 @@ jobs:
           name: ios-operational-evidence-${{ github.sha }}
           path: ios-operational-evidence/
           retention-days: 14
+      - name: Archive unsigned simulator app with executable permissions
+        run: |
+          set -euo pipefail
+          products="ios-derived-data/Build/Products/Debug-iphonesimulator"
+          app="$(find "$products" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$app"
+          tar -czf ios-operational-simulator-app.tar.gz -C "$products" "$(basename "$app")"
+      - name: Retain unsigned simulator app for runtime validation
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-operational-simulator-app-${{ github.sha }}
+          path: ios-operational-simulator-app.tar.gz
+          if-no-files-found: error
+          retention-days: 7

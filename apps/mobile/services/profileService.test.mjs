@@ -13,7 +13,7 @@ test('hydrates profile from the verified DataStorm subject and keeps device iden
     async request(path) {
       calls.push(path);
       if (path === '/core/identity/v1/account') return response({ subject_id: 'ds-sub', email: 'owner@example.test', account_status: 'active' });
-      if (path === '/core/identity/v1/products/kicks') return response({ profile: { subject_id: 'ds-sub', status: 'active' } });
+      if (path === '/core/identity/v1/products/kicks') return response({ entitlement: { subject_id: 'ds-sub', status: 'active' }, profile: { subject_id: 'ds-sub', status: 'active' } });
       if (path === '/v1/me/consumer-state') return response({ status: 'active' });
       if (path === '/core/consumer/v1/snapshot') return response({ monitoring: { status: 'active', apps_observed: 4 } });
       if (path === '/core/consumer/v1/devices') return response({ devices: [{ device_id: 'device-1', collector_status: 'healthy' }] });
@@ -38,7 +38,7 @@ test('fails closed when the account and KICK’S product identity do not match',
     user: { subjectId: 'ds-sub', email: 'owner@example.test' },
     async request(path) {
       if (path.endsWith('/account')) return response({ subject_id: 'other-sub', email: 'owner@example.test', account_status: 'active' });
-      if (path.endsWith('/products/kicks')) return response({ profile: { subject_id: 'ds-sub', status: 'active' } });
+      if (path.endsWith('/products/kicks')) return response({ entitlement: { subject_id: 'ds-sub', status: 'active' }, profile: { subject_id: 'ds-sub', status: 'active' } });
       return response({});
     }
   };
@@ -50,7 +50,7 @@ test('marks optional staging sources unavailable without fabricating live data',
     user: { subjectId: 'ds-sub', email: 'owner@example.test' },
     async request(path) {
       if (path.endsWith('/account')) return response({ subject_id: 'ds-sub', email: 'owner@example.test', account_status: 'active' });
-      if (path.endsWith('/products/kicks')) return response({ profile: { subject_id: 'ds-sub', status: 'active' } });
+      if (path.endsWith('/products/kicks')) return response({ entitlement: { subject_id: 'ds-sub', status: 'active' }, profile: { subject_id: 'ds-sub', status: 'active' } });
       return response({ error: 'not_found' }, 404);
     }
   };
@@ -66,11 +66,39 @@ test('does not publish hydrated data after the session changes during resource r
   const manager = {
     user,
     async request(path) {
-      if (path.endsWith('/account')) return response({ subject_id: 'ds-sub' });
-      if (path.endsWith('/products/kicks')) return response({ profile: { subject_id: 'ds-sub' } });
+      if (path.endsWith('/account')) return response({ subject_id: 'ds-sub', account_status: 'active' });
+      if (path.endsWith('/products/kicks')) return response({ entitlement: { subject_id: 'ds-sub', status: 'active' }, profile: { subject_id: 'ds-sub', status: 'active' } });
       manager.user = { subjectId: 'new-sub', email: 'other@example.test' };
       return response({});
     }
   };
   await assert.rejects(loadConsumerProfile(manager), /session changed/i);
 });
+
+for (const denied of [
+  { accountStatus: 'suspended' },
+  { accountStatus: 'closed' },
+  { accountStatus: undefined },
+  { entitlementStatus: 'revoked' },
+  { profileStatus: 'suspended' },
+  { entitlementSubject: 'other-sub' },
+  { missingEntitlement: true }
+]) {
+  test('profile rechecks access before resource reads: ' + JSON.stringify(denied), async () => {
+    let resourceReads = 0;
+    const manager = {
+      user: { subjectId: 'ds-sub', email: 'owner@example.test' },
+      async request(path) {
+        if (path.endsWith('/account')) return response({ subject_id: 'ds-sub', account_status: 'accountStatus' in denied ? denied.accountStatus : 'active' });
+        if (path.endsWith('/products/kicks')) return response({
+          entitlement: denied.missingEntitlement ? undefined : { subject_id: denied.entitlementSubject ?? 'ds-sub', status: denied.entitlementStatus ?? 'active' },
+          profile: { subject_id: 'ds-sub', status: denied.profileStatus ?? 'active' }
+        });
+        resourceReads++;
+        return response({});
+      }
+    };
+    await assert.rejects(loadConsumerProfile(manager), /access is unavailable|identity mismatch/i);
+    assert.equal(resourceReads, 0);
+  });
+}

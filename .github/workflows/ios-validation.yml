@@ -65,10 +65,10 @@ jobs:
           set -euo pipefail
           workspace="$(find ios -maxdepth 1 -name '*.xcworkspace' | head -n 1)"
           test -n "$workspace"
-          scheme="$(
-            xcodebuild -list -json -workspace "$workspace" |
-            python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["workspace"]["schemes"][0])'
-          )"
+          # Build the containing app, never the first CocoaPods dependency scheme.
+          scheme="$(basename "$workspace" .xcworkspace)"
+          xcodebuild -list -json -workspace "$workspace" |
+            python3 -c 'import json,sys; assert sys.argv[1] in json.load(sys.stdin)["workspace"]["schemes"], "App scheme missing"' "$scheme"
           test -n "$scheme"
           echo "workspace=$workspace"
           echo "scheme=$scheme"
