@@ -16,6 +16,10 @@
       "autoIncrement": true,
       "ios": {
         "simulator": false
+      },
+      "env": {
+        "KICKS_IOS_NATIVE_TUNNEL": "1",
+        "EXPO_PUBLIC_IOS_API_URL": "https://staging-api.datastorminc.live"
       }
     },
     "ios-production": {
@@ -24,6 +28,10 @@
       "autoIncrement": true,
       "ios": {
         "simulator": false
+      },
+      "env": {
+        "KICKS_IOS_NATIVE_TUNNEL": "1",
+        "EXPO_PUBLIC_IOS_API_URL": "https://staging-api.datastorminc.live"
       }
     }
   }
