@@ -30,8 +30,7 @@
         "simulator": false
       },
       "env": {
-        "KICKS_IOS_NATIVE_TUNNEL": "1",
-        "EXPO_PUBLIC_IOS_API_URL": "https://staging-api.datastorminc.live"
+        "KICKS_IOS_NATIVE_TUNNEL": "1"
       }
     }
   }
