@@ -39,7 +39,7 @@ function ConsumerAccount() {
       <Pressable accessibilityRole="button" disabled={busy || !email.trim() || !password} onPress={() => act(() => manager.login(email, password).then(() => { router.replace('/profile'); }))}>
         <Text style={s.link}>{busy ? 'Signing in…' : 'Sign in'}</Text>
       </Pressable>
-      <Text style={ui.body}>Use the DataStorm account you already created. Account creation and recovery are handled by DataStorm.</Text>
+      <Pressable accessibilityRole="button" disabled={busy} onPress={() => router.push("/register")}><Text style={s.link}>New to DataStorm? Create Account</Text></Pressable>
     </Card>}
     {(error || sessionWarning || (!user && restoreError)) && <Card>
       <Text accessibilityRole="alert" style={ui.body}>{error ?? sessionWarning ?? restoreError}</Text>
