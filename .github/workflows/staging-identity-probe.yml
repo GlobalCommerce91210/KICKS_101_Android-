@@ -1,0 +1,24 @@
+name: staging-identity-probe
+on:
+  push:
+    branches:
+      - fix/consumer-profile-empty-state-20261010
+  workflow_dispatch:
+jobs:
+  check-identity-route:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check staging health (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --fail-with-body --silent --show-error --location --max-time 20 --output /dev/null --write-out '%{http_code}' https://staging-api.datastorminc.live/health)
+          test "$code" = "200"
+      - name: Confirm identity route is deployed and rejects anonymous account access
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' https://staging-api.datastorminc.live/core/identity/v1/account)
+          echo "Anonymous account endpoint HTTP $code"
+          test "$code" = "401"
