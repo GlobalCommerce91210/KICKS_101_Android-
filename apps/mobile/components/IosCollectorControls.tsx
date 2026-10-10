@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, NativeModules, Pressable, Text } from 'react-native';
+import { Alert, NativeModules, Platform, Pressable, Text } from 'react-native';
+import { requireOptionalNativeModule } from 'expo';
+import { selectIosNativeAdapter } from '../services/iosNativeAdapter.mjs';
 import { randomUUID } from 'expo-crypto';
 import { Card, ui } from './Brand';
 import { useSession } from './SessionProvider';
-import { activateIosCollector, type BoundCollectorConsent, type IosCollectorNative } from '../services/iosCollectorActivation.mjs';
+import { activateIosCollector, type BoundCollectorConsent } from '../services/iosCollectorActivation.mjs';
 
 const policy = {
   permissionId: process.env.EXPO_PUBLIC_MONITORING_PERMISSION_ID ?? '',
@@ -24,9 +26,9 @@ export function IosCollectorControls() {
   const [busy, setBusy] = useState(false);
   const flight = useRef(false);
   const mounted = useRef(true);
-  const native = NativeModules.KicksTunnel as IosCollectorNative | undefined;
-  const usableNative = native && ['getDeviceId', 'prepare', 'requestAuthorization', 'start', 'stop', 'getStatus']
-    .every(method => typeof (native as unknown as Record<string, unknown>)[method] === 'function') ? native : undefined;
+  const usableNative = selectIosNativeAdapter(Platform.OS,
+    Platform.OS === 'ios' ? requireOptionalNativeModule('KicksTunnel') : null,
+    NativeModules.KicksTunnel);
   const readConsent = async (deviceId: string): Promise<BoundCollectorConsent | null> => {
     const subjectId = manager.user?.subjectId;
     if (!subjectId) throw new Error('Sign in before reviewing permission.');
