@@ -70,7 +70,7 @@ module.exports = function withKicksPacketTunnel(config) {
         CURRENT_PROJECT_VERSION: mainSettings.CURRENT_PROJECT_VERSION ?? '1',
         MARKETING_VERSION: mainSettings.MARKETING_VERSION ?? '0.2.6',
         DEVELOPMENT_TEAM: mainSettings.DEVELOPMENT_TEAM ?? '""',
-        LIBRARY_SEARCH_PATHS: ['"$(inherited)"', '"$(CONFIGURATION_BUILD_DIR)"'],
+        LIBRARY_SEARCH_PATHS: ['"$(inherited)"', '"$(CONFIGURATION_BUILD_DIR)"', '"$(SRCROOT)/vendor/wireguard-apple/Sources/WireGuardKitGo/out"'],
         // Xcode 26 does not propagate this pinned package's root-level custom
         // Clang module maps to Swift consumers. Reference the original maps.
         OTHER_SWIFT_FLAGS: ['"$(inherited)"', '"-Xcc"',
@@ -107,7 +107,10 @@ module.exports = function withKicksPacketTunnel(config) {
         'test "$PLATFORM_NAME" = iphoneos || { echo "KICKS tunnel validation requires iphoneos; simulator unsupported" >&2; exit 1; }\n' +
         'go version | grep -Eq "go1\\.19([. ]|$)" || { echo "Pinned WireGuard bridge requires Go 1.19" >&2; exit 1; }\n' +
         'WG_SOURCE="$SRCROOT/vendor/wireguard-apple/Sources/WireGuardKitGo"\n' +
-        'test -f "$WG_SOURCE/Makefile"\nmake -C "$WG_SOURCE"\n',
+        'test -f "$WG_SOURCE/Makefile"\n' +
+        'mkdir -p "$WG_SOURCE/out"\n' +
+        'make -C "$WG_SOURCE" DESTDIR="$WG_SOURCE/out" ARCHS=arm64\n' +
+        'test -s "$WG_SOURCE/out/libwg-go.a" || { echo "Missing WireGuard bridge archive" >&2; exit 1; }\n',
     });
     return mod;
   });
