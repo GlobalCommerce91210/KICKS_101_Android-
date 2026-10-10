@@ -1,0 +1,41 @@
+name: staging-onboarding-smoke
+
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/**'
+      - 'services/api/**'
+      - '.github/workflows/staging-onboarding-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-onboarding-boundary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Verify staging health and consumer identity boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          origin="https://staging-api.datastorminc.live"
+
+          code="$(curl -sS -o /tmp/health -w '%{http_code}' --max-time 20 "$origin/health")"
+          test "$code" = "200"
+          grep -q '"status":"ok"' /tmp/health
+          grep -q '"environment":"staging"' /tmp/health
+          grep -q '"durability":"postgres"' /tmp/health
+
+          code="$(curl -sS -o /tmp/account-get -w '%{http_code}' --max-time 20 "$origin/core/identity/v1/account")"
+          test "$code" = "401"
+          grep -q '"error":"unauthorized"' /tmp/account-get
+
+          code="$(curl -sS -o /tmp/profile-get -w '%{http_code}' --max-time 20 "$origin/core/consumer/v1/profile")"
+          test "$code" = "401"
+          grep -q '"error":"unauthorized"' /tmp/profile-get
+
+          code="$(curl -sS -o /tmp/account-post -w '%{http_code}' --max-time 20             -X POST "$origin/core/identity/v1/account"             -H 'content-type: application/json'             -H 'idempotency-key: ci-onboarding-probe-20261010-0001'             --data '{}')"
+          test "$code" = "422"
+          grep -q '"error":"validation_error"' /tmp/account-post
