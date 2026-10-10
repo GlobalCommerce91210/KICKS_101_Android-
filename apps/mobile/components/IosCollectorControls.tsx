@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, NativeModules, Pressable, Text } from 'react-native';
+import { Alert, NativeModules, Platform, Pressable, Text } from 'react-native';
+import { requireOptionalNativeModule } from 'expo';
+import { selectIosNativeAdapter } from '../services/iosNativeAdapter.mjs';
 import { randomUUID } from 'expo-crypto';
 import { Card, ui } from './Brand';
 import { useSession } from './SessionProvider';
-import { activateIosCollector, type BoundCollectorConsent, type IosCollectorNative } from '../services/iosCollectorActivation.mjs';
+import { activateIosCollector, type BoundCollectorConsent } from '../services/iosCollectorActivation.mjs';
 
 const policy = {
   permissionId: process.env.EXPO_PUBLIC_MONITORING_PERMISSION_ID ?? '',
@@ -24,9 +26,9 @@ export function IosCollectorControls() {
   const [busy, setBusy] = useState(false);
   const flight = useRef(false);
   const mounted = useRef(true);
-  const native = NativeModules.KicksTunnel as IosCollectorNative | undefined;
-  const usableNative = native && ['getDeviceId', 'prepare', 'requestAuthorization', 'start', 'stop', 'getStatus']
-    .every(method => typeof (native as unknown as Record<string, unknown>)[method] === 'function') ? native : undefined;
+  const usableNative = selectIosNativeAdapter(Platform.OS,
+    Platform.OS === 'ios' ? requireOptionalNativeModule('KicksTunnel') : null,
+    NativeModules.KicksTunnel);
   const readConsent = async (deviceId: string): Promise<BoundCollectorConsent | null> => {
     const subjectId = manager.user?.subjectId;
     if (!subjectId) throw new Error('Sign in before reviewing permission.');
@@ -58,9 +60,15 @@ export function IosCollectorControls() {
       if (!configured) throw new Error('The reviewed collection purpose is not configured for this build. Monitoring remains off.');
       const result = await activateIosCollector({
         subject: () => mounted.current ? manager.user?.subjectId ?? null : null, policy, native: usableNative,
+        provision: usableNative?.provision ? async () => {
+          await manager.provisionIosCollector({ provision: usableNative.provision!.bind(usableNative) });
+        } : undefined,
+        renewLease: usableNative?.renewLease ? async () => {
+          await manager.renewIosCollectorLease({ renewLease: usableNative.renewLease!.bind(usableNative) }, policy.permissionId);
+        } : undefined,
         disclose: () => new Promise<boolean>(resolve => Alert.alert(
           'Allow KICK’S network monitoring?',
-          'Purpose: ' + policy.purpose + '\n\nMonitoring is limited to the reviewed metadata categories. No message or payload contents are authorized. This consent does not authorize commercial sharing or compensated studies.\n\nYou can stop monitoring or revoke consent in Permissions. Continuing saves this device’s consent if needed, then asks iOS for separate VPN permission.',
+          'Purpose: ' + policy.purpose + '\n\nMonitoring is limited to the reviewed metadata categories. No message or payload contents are authorized. This consent does not authorize commercial sharing or compensated studies.\n\nYou can stop monitoring or revoke consent in Permissions. Continuing enrolls this iPad with your account, saves consent if needed, and requests a short-lived gateway authorization before asking iOS for separate VPN permission.',
           [{ text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
            { text: 'Continue', onPress: () => resolve(true) }], { cancelable: true, onDismiss: () => resolve(false) })),
         readConsent,

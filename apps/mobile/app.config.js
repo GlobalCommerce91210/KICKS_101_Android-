@@ -5,6 +5,9 @@ module.exports = ({ config }) => {
     plugins: [...new Set([...(config.plugins ?? []), 'expo-secure-store'])],
   };
   if (process.env.EAS_BUILD_PLATFORM !== 'ios' && process.env.KICKS_BUILD_PLATFORM !== 'ios') return nativeConfig;
+  if (process.env.KICKS_IOS_NATIVE_TUNNEL === '1') {
+    nativeConfig.plugins.push('./plugins/with-kicks-packet-tunnel');
+  }
   return {
     ...nativeConfig,
     slug: 'ezekiel-ios',

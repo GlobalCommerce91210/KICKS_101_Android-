@@ -9,3 +9,8 @@ android/.gradle/
 android/app/build/
 *.jks
 *.keystore
+apps/mobile/android/.gradle/
+apps/mobile/android/app/build/
+apps/mobile/android/build/
+apps/mobile/android/local.properties
+artifacts/premerge/
