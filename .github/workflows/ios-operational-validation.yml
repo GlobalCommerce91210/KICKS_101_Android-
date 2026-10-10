@@ -1,6 +1,8 @@
 name: ios-operational-validation
 
 on:
+  pull_request:
+    branches: ['release/0.2.6-shared-beta-20261009']
   push:
     branches: ['implementation/ios-operational-beta', 'release/0.2.6-shared-beta-20261009']
   workflow_dispatch:
