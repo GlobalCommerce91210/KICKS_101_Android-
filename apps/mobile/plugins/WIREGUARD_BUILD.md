@@ -15,8 +15,13 @@ for the two existing upstream Clang module maps. The failed Xcode 26 compile
 contained neither module-map flags nor C target search paths despite building
 those targets, so Swift could not resolve WireGuardKitC or WireGuardKitGo.
 The package uses its own manifest directory to form absolute module-map paths;
-the consuming extension receives matching flags. No module-map, header, Go,
-cryptography, or tunnel source is modified. Unexpected modifications
+the consuming extension receives matching flags. A second verified patch adds
+`#include <sys/types.h>` to WireGuardKitC.h: its existing ctl_info and sockaddr_ctl
+structs use Darwin unsigned types, and Xcode's explicit module compiler rejects
+the header without importing their defining system header. The original header
+hash is verified, original license lines stay intact, and the patched hash is
+recorded. No type, struct layout, module-map, Go, cryptographic, or tunnel logic
+is changed. Unexpected modifications
 fail preparation. Xcode references this local package instead of fetching an
 unpatched remote manifest. Repeated generation accepts only the original or
 exactly patched manifest (including the previous tools-version-only patch).
