@@ -44,6 +44,20 @@ jobs:
       - name: Install native dependencies
         working-directory: apps/mobile/ios
         run: pod install
+      - name: Build and verify WireGuard Go archive before Xcode linking
+        working-directory: apps/mobile
+        run: |
+          set -euo pipefail
+          source_dir="$PWD/ios/vendor/wireguard-apple/Sources/WireGuardKitGo"
+          archive="$source_dir/out/libwg-go.a"
+          test -f "$source_dir/Makefile"
+          sdkroot="$(xcrun --sdk iphoneos --show-sdk-path)"
+          mkdir -p "$source_dir/out" ../../ios-tunnel-evidence
+          make -C "$source_dir" build ARCHS=arm64 PLATFORM_NAME=iphoneos SDKROOT="$sdkroot" DESTDIR="$source_dir/out"
+          test -s "$archive"
+          xcrun lipo "$archive" -verify_arch arm64
+          xcrun nm -g "$archive" | grep -q '_wgTurnOn'
+          shasum -a 256 "$archive" > ../../ios-tunnel-evidence/WIREGUARD_ARCHIVE_SHA256.txt
       - name: Build unsigned device app and transport
         working-directory: apps/mobile
         run: |

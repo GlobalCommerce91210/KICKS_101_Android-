@@ -57,6 +57,23 @@ module.exports = function withKicksPacketTunnel(config) {
         entry.settings = { ATTRIBUTES: ['CodeSignOnCopy', 'RemoveHeadersOnCopy'] };
       }
     }
+    // The Go bridge archive must exist before Swift/framework link resolution.
+    // Put this phase first on the extension target and declare its archive output
+    // so Xcode has an explicit pre-link dependency instead of a best-effort script.
+    const wireGuardPhase = project.addBuildPhase([], 'PBXShellScriptBuildPhase', 'Build WireGuard Go bridge', extension.uuid, {
+      shellPath: '/bin/sh', shellScript: 'set -eu\\n' +
+        'test "$PLATFORM_NAME" = iphoneos || { echo "KICKS tunnel validation requires iphoneos; simulator unsupported" >&2; exit 1; }\\n' +
+        'go version | grep -Eq "go1\\\\.19([. ]|$)" || { echo "Pinned WireGuard bridge requires Go 1.19" >&2; exit 1; }\\n' +
+        'WG_SOURCE="$SRCROOT/vendor/wireguard-apple/Sources/WireGuardKitGo"\\n' +
+        'WG_OUTPUT="$WG_SOURCE/out/libwg-go.a"\\n' +
+        'test -f "$WG_SOURCE/Makefile"\\n' +
+        'mkdir -p "$WG_SOURCE/out"\\n' +
+        'make -C "$WG_SOURCE" DESTDIR="$WG_SOURCE/out" ARCHS=arm64 build\\n' +
+        'test -s "$WG_OUTPUT" || { echo "Missing WireGuard bridge archive at $WG_OUTPUT" >&2; exit 1; }\\n',
+    });
+    if (wireGuardPhase?.buildPhase) {
+      wireGuardPhase.buildPhase.outputPaths = ['"$(SRCROOT)/vendor/wireguard-apple/Sources/WireGuardKitGo/out/libwg-go.a"'];
+    }
     project.addBuildPhase([`${TARGET}/PacketTunnelProvider.swift`], 'PBXSourcesBuildPhase', 'Sources', extension.uuid);
     const frameworks = project.addBuildPhase([], 'PBXFrameworksBuildPhase', 'Frameworks', extension.uuid);
     project.addBuildPhase([], 'PBXResourcesBuildPhase', 'Resources', extension.uuid);
@@ -70,7 +87,7 @@ module.exports = function withKicksPacketTunnel(config) {
         CURRENT_PROJECT_VERSION: mainSettings.CURRENT_PROJECT_VERSION ?? '1',
         MARKETING_VERSION: mainSettings.MARKETING_VERSION ?? '0.2.6',
         DEVELOPMENT_TEAM: mainSettings.DEVELOPMENT_TEAM ?? '""',
-        LIBRARY_SEARCH_PATHS: ['"$(inherited)"', '"$(CONFIGURATION_BUILD_DIR)"'],
+        LIBRARY_SEARCH_PATHS: ['"$(inherited)"', '"$(CONFIGURATION_BUILD_DIR)"', '"$(SRCROOT)/vendor/wireguard-apple/Sources/WireGuardKitGo/out"'],
         // Xcode 26 does not propagate this pinned package's root-level custom
         // Clang module maps to Swift consumers. Reference the original maps.
         OTHER_SWIFT_FLAGS: ['"$(inherited)"', '"-Xcc"',
@@ -100,15 +117,6 @@ module.exports = function withKicksPacketTunnel(config) {
     const buildId = addObject('PBXBuildFile', { isa: 'PBXBuildFile', productRef: productId,
       productRef_comment: 'WireGuardKit' }, 'WireGuardKit in Frameworks');
     frameworks.buildPhase.files.push({ value: buildId, comment: 'WireGuardKit in Frameworks' });
-    // Upstream WireGuardKit requires the Go archive before the extension links.
-    // Go 1.19 is required by the pinned upstream runtime patch; CI must install it.
-    project.addBuildPhase([], 'PBXShellScriptBuildPhase', 'Build WireGuard Go bridge', extension.uuid, {
-      shellPath: '/bin/sh', shellScript: 'set -eu\n' +
-        'test "$PLATFORM_NAME" = iphoneos || { echo "KICKS tunnel validation requires iphoneos; simulator unsupported" >&2; exit 1; }\n' +
-        'go version | grep -Eq "go1\\.19([. ]|$)" || { echo "Pinned WireGuard bridge requires Go 1.19" >&2; exit 1; }\n' +
-        'WG_SOURCE="$SRCROOT/vendor/wireguard-apple/Sources/WireGuardKitGo"\n' +
-        'test -f "$WG_SOURCE/Makefile"\nmake -C "$WG_SOURCE"\n',
-    });
     return mod;
   });
 };
