@@ -69,3 +69,10 @@ jobs:
           name: ios-operational-evidence-${{ github.sha }}
           path: ios-operational-evidence/
           retention-days: 14
+      - name: Retain unsigned simulator app for runtime validation
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-operational-simulator-app-${{ github.sha }}
+          path: ios-derived-data/Build/Products/Debug-iphonesimulator/*.app/
+          if-no-files-found: error
+          retention-days: 7
