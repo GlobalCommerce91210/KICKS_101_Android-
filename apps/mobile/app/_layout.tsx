@@ -25,7 +25,7 @@ function MobileTabs() {
       <Tabs.Screen name="wallet" options={{ title: 'Wallet' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile', href: '/profile' }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
-      <Tabs.Screen name="account" options={{ title: 'Account', href: null }} />
+      <Tabs.Screen name="account" options={{ title: 'Account', href: null }} />\n      <Tabs.Screen name="register" options={{ title: 'Register', href: null }} />
     </Tabs>
   );
 }

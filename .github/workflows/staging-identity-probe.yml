@@ -1,0 +1,35 @@
+name: staging-identity-probe
+on:
+  push:
+    branches:
+      - fix/consumer-profile-empty-state-20261010
+  workflow_dispatch:
+jobs:
+  check-identity-route:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check staging health (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --fail-with-body --silent --show-error --location --max-time 20 --output /dev/null --write-out '%{http_code}' https://staging-api.datastorminc.live/health)
+          test "$code" = "200"
+      - name: Confirm identity route is deployed and rejects anonymous account access
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' https://staging-api.datastorminc.live/core/identity/v1/account)
+          echo "Anonymous account endpoint HTTP $code"
+          if [ "$code" = "302" ] || [ "$code" = "301" ] || [ "$code" = "303" ] || [ "$code" = "307" ] || [ "$code" = "308" ]; then
+            echo "::error::Identity endpoint is behind a redirecting access gateway (HTTP $code). Verify the approved Cloudflare Access policy/service identity and origin route; do not bypass the gateway."
+            exit 1
+          fi
+          if [ "$code" = "404" ]; then
+            echo "::error::Identity API route is missing on the currently deployed staging origin."
+            exit 1
+          fi
+          if [ "$code" != "401" ]; then
+            echo "::error::Unexpected identity API result HTTP $code; staging registration is not verified."
+            exit 1
+          fi
