@@ -59,9 +59,16 @@ export async function loadConsumerProfile(manager: SessionManager): Promise<Cons
   const account = await readJson(accountResponse, 'Account');
   const product = await readJson(productResponse, 'KICK’S profile');
 
-  if (account.subject_id !== user.subjectId || product.profile?.subject_id !== user.subjectId) {
+  if (account.subject_id !== user.subjectId || product.profile?.subject_id !== user.subjectId ||
+      product.entitlement?.subject_id !== user.subjectId) {
     throw new SessionError('Account identity mismatch. Sign in again.');
   }
+
+  if (!['active', 'pending_verification'].includes(account.account_status) ||
+      product.entitlement?.status !== 'active' || product.profile?.status !== 'active') {
+    throw new SessionError('KICK’S access is unavailable for this account.');
+  }
+  if (manager.user !== user) throw new SessionError('Your session changed. Sign in again.');
 
   const unavailable: string[] = [];
   const encodedSubject = encodeURIComponent(user.subjectId);
