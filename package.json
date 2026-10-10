@@ -2,7 +2,11 @@
   "name": "kicks-app",
   "private": true,
   "version": "0.1.0",
-  "workspaces": ["apps/*", "services/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "services/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "npm run dev --workspace @kicks/api",
     "build": "npm run build:web --workspace @kicks/mobile && node -e \"const fs=require('fs'); fs.mkdirSync('dist',{recursive:true}); fs.cpSync('apps/mobile/dist','dist',{recursive:true});\"",
@@ -10,6 +14,13 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"
   },
-  "engines": { "node": ">=20" },
-  "overrides": { "postcss": "8.5.26", "uuid": "11.1.1" }
+  "engines": {
+    "node": ">=20"
+  },
+  "overrides": {
+    "postcss": "8.5.26",
+    "uuid": "11.1.1",
+    "shell-quote": "1.12.0",
+    "source-map-js": "1.2.2"
+  }
 }
