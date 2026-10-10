@@ -6,10 +6,12 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View
+  View,
+  Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { BrandHeader, Card, Screen, colors, ui } from '../components/Brand';
+import { AccountWallet } from '../components/AccountWallet';
 import {
   PayoutRequest,
   ProgressionState,
@@ -23,6 +25,11 @@ const USER_ID = 'user_demo_01';
 type Tab = 'ledger' | 'by_app' | 'by_metadata';
 
 export default function Wallet() {
+  if (Platform.OS === 'ios') return <AccountWallet />;
+  return <LegacyWallet />;
+}
+
+function LegacyWallet() {
   const [activeTab, setActiveTab] = useState<Tab>('ledger');
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<WalletSummary | null>(null);
