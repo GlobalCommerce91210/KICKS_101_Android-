@@ -60,9 +60,15 @@ export function IosCollectorControls() {
       if (!configured) throw new Error('The reviewed collection purpose is not configured for this build. Monitoring remains off.');
       const result = await activateIosCollector({
         subject: () => mounted.current ? manager.user?.subjectId ?? null : null, policy, native: usableNative,
+        provision: usableNative?.provision ? async () => {
+          await manager.provisionIosCollector({ provision: usableNative.provision!.bind(usableNative) });
+        } : undefined,
+        renewLease: usableNative?.renewLease ? async () => {
+          await manager.renewIosCollectorLease({ renewLease: usableNative.renewLease!.bind(usableNative) }, policy.permissionId);
+        } : undefined,
         disclose: () => new Promise<boolean>(resolve => Alert.alert(
           'Allow KICK’S network monitoring?',
-          'Purpose: ' + policy.purpose + '\n\nMonitoring is limited to the reviewed metadata categories. No message or payload contents are authorized. This consent does not authorize commercial sharing or compensated studies.\n\nYou can stop monitoring or revoke consent in Permissions. Continuing saves this device’s consent if needed, then asks iOS for separate VPN permission.',
+          'Purpose: ' + policy.purpose + '\n\nMonitoring is limited to the reviewed metadata categories. No message or payload contents are authorized. This consent does not authorize commercial sharing or compensated studies.\n\nYou can stop monitoring or revoke consent in Permissions. Continuing enrolls this iPad with your account, saves consent if needed, and requests a short-lived gateway authorization before asking iOS for separate VPN permission.',
           [{ text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
            { text: 'Continue', onPress: () => resolve(true) }], { cancelable: true, onDismiss: () => resolve(false) })),
         readConsent,

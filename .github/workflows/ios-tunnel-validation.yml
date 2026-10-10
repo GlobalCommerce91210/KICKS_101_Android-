@@ -6,6 +6,7 @@ on:
     paths:
       - 'apps/mobile/native/PacketTunnel/**'
       - 'apps/mobile/plugins/with-kicks-packet-tunnel.js'
+      - 'apps/mobile/plugins/prepare-wireguard-source.js'
       - 'apps/mobile/app.config.js'
       - '.github/workflows/ios-tunnel-validation.yml'
 
@@ -63,6 +64,7 @@ jobs:
           git rev-parse HEAD > ../../ios-tunnel-evidence/SOURCE_COMMIT.txt
           xcodebuild -version > ../../ios-tunnel-evidence/XCODE.txt
           go version > ../../ios-tunnel-evidence/GO.txt
+          cp ios/vendor/WIREGUARD_PROVENANCE.json ../../ios-tunnel-evidence/
           find ios-tunnel-derived -name Package.resolved -exec cp {} ../../ios-tunnel-evidence/ \;
       - name: Preserve compilation evidence
         if: always()

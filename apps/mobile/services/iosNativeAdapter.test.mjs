@@ -16,3 +16,8 @@ test('rejects incomplete modules instead of attempting collection', () => {
 test('never exposes an iOS adapter to Android or web', () => {
   for (const platform of ['android', 'web']) assert.equal(selectIosNativeAdapter(platform, bridge(), bridge()), undefined);
 });
+
+test('rejects a partially upgraded enrollment bridge', () => {
+  const partial = { ...bridge(), provision: async () => 'device' };
+  assert.equal(selectIosNativeAdapter('ios', partial, undefined), undefined);
+});

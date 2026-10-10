@@ -150,6 +150,26 @@ export class SessionManager {
       throw error;
     }
   }
+  private async nativeCollectorSession<T>(operation: (origin: string, bearer: string, subject: string) => Promise<T>): Promise<T> {
+    if (!this.user) throw new SessionError('Sign in to enroll this iPad.');
+    const epoch = this.epoch;
+    const origin = this.baseUrl();
+    if (Date.now() >= this.expiresAt - 30000) await this.refresh(epoch);
+    if (epoch !== this.epoch || !this.user || !this.accessToken || this.baseUrl() !== origin) {
+      throw new SessionError('Your session changed. Try again.');
+    }
+    const result = await operation(origin, this.accessToken, this.user.subjectId);
+    if (epoch !== this.epoch || !this.user || this.baseUrl() !== origin) {
+      throw new SessionError('Your session changed. Monitoring remains off.');
+    }
+    return result;
+  }
+  async provisionIosCollector(native: { provision(origin: string, bearer: string, subject: string): Promise<string> }): Promise<string> {
+    return this.nativeCollectorSession((origin, bearer, subject) => native.provision(origin, bearer, subject));
+  }
+  async renewIosCollectorLease(native: { renewLease(bearer: string, permissionId: string): Promise<void> }, permissionId: string): Promise<void> {
+    await this.nativeCollectorSession((_origin, bearer) => native.renewLease(bearer, permissionId));
+  }
   async logout() {
     ++this.epoch;
     this.refreshFlight = null;

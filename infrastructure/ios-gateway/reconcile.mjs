@@ -23,13 +23,14 @@ export async function reconcile({ readAuthority, apply, now = Date.now }) {
   }
 }
 
-export function httpsAuthorityReader({ url, authorization, fetchImpl = fetch }) {
+export function httpsAuthorityReader({ url, authorization, fetchImpl = fetch, signal }) {
   const endpoint = new URL(url);
   if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || !authorization)
     throw new Error('authenticated_https_authority_required');
   return async () => {
     const response = await fetchImpl(endpoint, {
-      headers: { authorization, accept: 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(3000),
+      headers: { authorization, accept: 'application/json' }, redirect: 'error',
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000),
     });
     if (!response.ok) throw new Error('authority_request_failed');
     // Bound streamed responses too; Content-Length is not authoritative.

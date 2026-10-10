@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes } from 'node:crypto';
 import { buildServer } from './server.js';
 import { Pool } from 'pg';
 import { readFile } from 'node:fs/promises';
@@ -9,6 +9,34 @@ import { PostgresConsumerIdentityStore } from './consumer-identity-postgres.js';
 import { PostgresConsumerDeviceBindingStore } from './consumer-device-bindings.js';
 import { SessionManager } from '../../../apps/mobile/services/sessionCore.js';
 import { PostgresGatewayLeaseStore } from './ios-gateway-enrollment.js';
+import { PostgresIosDeviceProvisioner } from './ios-device-provisioning.js';
+
+test('PostgreSQL native device provisioning persists retries and atomically rolls back conflicting device binding', { skip: !process.env.KICKS_TEST_DATABASE_URL }, async()=>{
+  const schema='test_ios_provision_'+randomUUID().replaceAll('-','');
+  const admin=new Pool({connectionString:process.env.KICKS_TEST_DATABASE_URL});await admin.query('CREATE SCHEMA '+schema);
+  const url=new URL(process.env.KICKS_TEST_DATABASE_URL!);url.searchParams.set('options','-c search_path='+schema);
+  const pool=new Pool({connectionString:url.toString()});const identity=new PostgresConsumerIdentityStore(pool);
+  const bindings=new PostgresConsumerDeviceBindingStore(pool);
+  try{
+    await pool.query(await readFile(new URL('../db/schema.sql',import.meta.url),'utf8'));
+    const account=await identity.createAccount({email:'native-provision@example.test',password:'Synthetic-Password-2026',terms_version:'one',privacy_version:'one'});
+    await bindings.list(account.account.subject_id);
+    let provisioner=new PostgresIosDeviceProvisioner(pool);
+    const input={accountSubjectId:account.account.subject_id,requestId:randomUUID(),deviceId:randomUUID(),deviceToken:randomBytes(32).toString('base64url'),publicKey:randomBytes(32).toString('base64')};
+    assert.equal((await provisioner.provision(input)).status,'provisioned');
+    provisioner=new PostgresIosDeviceProvisioner(pool);
+    assert.equal((await provisioner.provision(input)).status,'replayed');
+    const changed={...input,requestId:randomUUID(),deviceId:randomUUID(),deviceToken:randomBytes(32).toString('base64url')};
+    await assert.rejects(provisioner.provision(changed)); // duplicate public key after device+binding inserts
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM devices')).rows[0].n,1);
+    assert.equal((await bindings.list(input.accountSubjectId)).length,1);
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM consent_events')).rows[0].n,0);
+    await assert.rejects(provisioner.provision({...input,accountSubjectId:'different-account'}));
+    await bindings.revoke(input.accountSubjectId,input.deviceId);
+    await assert.rejects(provisioner.provision(input)); // never revive a removed binding
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM devices')).rows[0].n,1);
+  }finally{await pool.end();await admin.query('DROP SCHEMA '+schema+' CASCADE');await admin.end();}
+});
 
 test('PostgreSQL gateway lease allocation survives restart, serializes competing addresses and rejects key reuse', { skip: !process.env.KICKS_TEST_DATABASE_URL }, async () => {
   const schema = 'test_gateway_' + randomUUID().replaceAll('-', '');

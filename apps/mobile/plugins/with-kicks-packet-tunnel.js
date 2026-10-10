@@ -5,7 +5,7 @@ const { withEntitlementsPlist, withInfoPlist, withDangerousMod, withXcodeProject
 const TARGET = 'KicksPacketTunnel';
 const BUNDLE = 'com.datastorm.kicks.PacketTunnel';
 const GROUP = '$(AppIdentifierPrefix)com.datastorm.kicks.collector';
-const REVISION = '2fec12a6e1f6e3460b6ee483aa00ad29cddadab1';
+const { prepareWireGuardSource } = require('./prepare-wireguard-source');
 
 // Opt-in while enrollment/gateway/device verification remains open. No remote
 // certificate, profile, team membership, or App Store identity is modified here.
@@ -22,6 +22,7 @@ module.exports = function withKicksPacketTunnel(config) {
     return mod;
   });
   config = withDangerousMod(config, ['ios', async mod => {
+    prepareWireGuardSource(mod.modRequest.platformProjectRoot);
     const destination = path.join(mod.modRequest.platformProjectRoot, TARGET);
     fs.mkdirSync(destination, { recursive: true });
     fs.copyFileSync(path.join(mod.modRequest.projectRoot, 'native/PacketTunnel/PacketTunnelProvider.swift'),
@@ -80,9 +81,8 @@ module.exports = function withKicksPacketTunnel(config) {
       objects[section][`${id}_comment`] = comment;
       return id;
     };
-    const packageId = addObject('XCRemoteSwiftPackageReference', {
-      isa: 'XCRemoteSwiftPackageReference', repositoryURL: '"https://git.zx2c4.com/wireguard-apple"',
-      requirement: { kind: 'revision', revision: REVISION },
+    const packageId = addObject('XCLocalSwiftPackageReference', {
+      isa: 'XCLocalSwiftPackageReference', relativePath: '"vendor/wireguard-apple"',
     }, 'WireGuardKit');
     const root = project.getFirstProject().firstProject;
     root.packageReferences ??= [];
@@ -100,7 +100,7 @@ module.exports = function withKicksPacketTunnel(config) {
       shellPath: '/bin/sh', shellScript: 'set -eu\n' +
         'test "$PLATFORM_NAME" = iphoneos || { echo "KICKS tunnel validation requires iphoneos; simulator unsupported" >&2; exit 1; }\n' +
         'go version | grep -Eq "go1\\.19([. ]|$)" || { echo "Pinned WireGuard bridge requires Go 1.19" >&2; exit 1; }\n' +
-        'WG_SOURCE="${BUILD_DIR%Build/*}SourcePackages/checkouts/wireguard-apple/Sources/WireGuardKitGo"\n' +
+        'WG_SOURCE="$SRCROOT/vendor/wireguard-apple/Sources/WireGuardKitGo"\n' +
         'test -f "$WG_SOURCE/Makefile"\nmake -C "$WG_SOURCE"\n',
     });
     return mod;

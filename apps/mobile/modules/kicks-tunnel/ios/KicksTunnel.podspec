@@ -10,7 +10,7 @@ Pod::Spec.new do |s|
   s.source = { :git => s.homepage }
   s.static_framework = true
   s.dependency 'ExpoModulesCore'
-  s.frameworks = 'NetworkExtension', 'Security'
+  s.frameworks = 'NetworkExtension', 'Security', 'CryptoKit'
   s.swift_version = '5.0'
   s.source_files = '**/*.swift'
 end

@@ -5,6 +5,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
 import { z } from 'zod';
+import { Pool } from 'pg';
+import { PostgresIosDeviceProvisioner } from './ios-device-provisioning.js';
 import { endpointBySignatureId } from './endpoint-intelligence.js';
 import { InverseGrowthEngine } from './inverse-growth.js';
 import { InversePricingEngine } from './inverse-pricing.js';
@@ -165,6 +167,7 @@ export function buildServer(options: {
   consumerIdentityStore?: ConsumerIdentityStore;
   consumerDeviceBindingStore?: ConsumerDeviceBindingStore;
   iosGateway?: import('./kicks-consumer-routes.js').KicksConsumerRouteDependencies['iosGateway'];
+  iosDeviceProvisioner?: import('./ios-device-provisioning.js').IosDeviceProvisioner;
 } = {}) {
   const databaseUrl = process.env.DATABASE_URL ?? process.env.KICKS_DATABASE_URL;
   const environment = resolveRuntimeEnvironment({
@@ -200,6 +203,9 @@ export function buildServer(options: {
   const deviceBindingStore = options.consumerDeviceBindingStore ?? (databaseUrl
     ? PostgresConsumerDeviceBindingStore.fromConnectionString(databaseUrl)
     : new MemoryConsumerDeviceBindingStore());
+  const iosProvisioningPool = environment === 'staging' && databaseUrl && !options.iosDeviceProvisioner &&
+    process.env.KICKS_IOS_PROVISIONING_ENABLED === 'true' ? new Pool({ connectionString: databaseUrl }) : null;
+  const iosDeviceProvisioner = options.iosDeviceProvisioner ?? (iosProvisioningPool ? new PostgresIosDeviceProvisioner(iosProvisioningPool) : undefined);
   const app = Fastify({
     logger: { redact: [
       'req.headers.authorization',
@@ -220,7 +226,7 @@ export function buildServer(options: {
     return payload;
   });
   app.addHook('onClose', async () => {
-    await Promise.all([store.close(), identityStore.close(), deviceBindingStore.close()]);
+    await Promise.all([store.close(), identityStore.close(), deviceBindingStore.close(), iosProvisioningPool?.end()]);
   });
 
   app.get('/health', async () => ({
@@ -238,6 +244,7 @@ export function buildServer(options: {
     walletEngine,
     complianceEngine,
     iosGateway: environment === 'staging' ? options.iosGateway : undefined,
+    iosDeviceProvisioner: environment === 'staging' ? iosDeviceProvisioner : undefined,
   });
 
   const authenticateAdmin = (suppliedSecret: string) => Boolean(adminSecret)

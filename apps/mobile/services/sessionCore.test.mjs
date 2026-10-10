@@ -162,3 +162,24 @@ test('rejected refresh clears identity even before the old access token expires'
   assert.equal(f.saved, null);
   assert.ok(!f.calls.some(call => call.path === '/core/consumer/v1/devices'));
 });
+
+test('native provisioning shares the current refresh flow without persisting a bearer', async () => {
+  const f = fixture({ expired: true });
+  await f.manager.login('owner@example.test', 'password');
+  let handedOff;
+  const native = { async provision(origin, bearer, subject) { handedOff = {origin,bearer,subject}; return 'ipad'; } };
+  const [device] = await Promise.all([f.manager.provisionIosCollector(native), f.manager.request('/core/consumer/v1/devices')]);
+  assert.equal(device, 'ipad'); assert.equal(f.refreshes, 1);
+  assert.equal(handedOff.bearer, 'rotated-access');
+  assert.ok(!f.saved.includes('rotated-access'));
+});
+test('logout while native provisioning is pending rejects its public result', async () => {
+  const f = fixture(); await f.manager.login('owner@example.test', 'password');
+  let release; let entered;
+  const gate = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { entered = resolve; });
+  const pending = f.manager.provisionIosCollector({ async provision() { entered(); await gate; return 'ipad'; } });
+  await started; await f.manager.logout(); release();
+  await assert.rejects(pending, /session changed/);
+  assert.equal(f.manager.user, null);
+});

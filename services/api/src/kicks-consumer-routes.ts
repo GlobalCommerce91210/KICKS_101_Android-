@@ -17,6 +17,7 @@ export interface KicksConsumerRouteDependencies {
   walletEngine: WalletEngine;
   complianceEngine: ComplianceEngine;
   iosGateway?: { enrollment: IosGatewayEnrollment; authenticateAuthority: (authorization: string | undefined) => Promise<boolean> };
+  iosDeviceProvisioner?: import('./ios-device-provisioning.js').IosDeviceProvisioner;
 }
 
 const bearer = (authorization?: string) => {
@@ -377,6 +378,23 @@ export function registerKicksConsumerRoutes(
     const binding = bindings.find(item => item.device_id === deviceId && item.status === 'active');
     return { consumer, binding };
   };
+
+  app.post('/core/consumer/v1/ios-devices/provision', async(request,reply)=>{
+    const consumer=await authenticateConsumer(request.headers.authorization);
+    if(!consumer)return reply.code(401).send({error:'unauthorized'});
+    if(!dependencies.iosDeviceProvisioner)return reply.code(503).send({error:'ios_provisioning_not_configured'});
+    const input=z.object({requestId:z.string().uuid().transform(v=>v.toLowerCase()),deviceId:z.string().uuid().transform(v=>v.toLowerCase()),deviceToken:z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+      publicKey:z.string().regex(/^[A-Za-z0-9+/]{43}=$/)}).strict().safeParse(request.body);
+    if(!input.success || Buffer.from(input.data.deviceToken,'base64url').toString('base64url')!==input.data.deviceToken ||
+      Buffer.from(input.data.publicKey,'base64').toString('base64')!==input.data.publicKey || Buffer.from(input.data.publicKey,'base64').every(b=>b===0))
+      return reply.code(422).send({error:'validation_error'});
+    // Ensure persistent binding schema exists before the provisioning transaction.
+    await deviceBindingStore.list(consumer.subjectId);
+    try{
+      const provisioned=await dependencies.iosDeviceProvisioner.provision({...input.data,accountSubjectId:consumer.subjectId});
+      return reply.code(provisioned.status==='replayed'?200:201).send(provisioned);
+    }catch{return reply.code(409).send({error:'ios_provisioning_conflict'});}
+  });
 
   // Disabled unless explicitly wired to a staging authority and a durable lease store.
   app.post('/core/consumer/v1/devices/:deviceId/ios-gateway-lease', async (request, reply) => {
