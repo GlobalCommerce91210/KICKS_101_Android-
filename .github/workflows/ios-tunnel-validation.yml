@@ -1,0 +1,74 @@
+name: ios-tunnel-validation
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/mobile/native/PacketTunnel/**'
+      - 'apps/mobile/plugins/with-kicks-packet-tunnel.js'
+      - 'apps/mobile/app.config.js'
+      - '.github/workflows/ios-tunnel-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  unsigned-device-transport:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      KICKS_BUILD_PLATFORM: ios
+      KICKS_IOS_NATIVE_TUNNEL: '1'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          # The pinned official bridge patches this Go runtime specifically.
+          go-version: '1.19.13'
+          cache: false
+      - name: Install locked workspace dependencies
+        run: npm ci
+      - name: Select supported Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+      - name: Generate app and embedded tunnel
+        working-directory: apps/mobile
+        run: npx expo prebuild --platform ios --clean --no-install
+      - name: Install native dependencies
+        working-directory: apps/mobile/ios
+        run: pod install
+      - name: Build unsigned device app and transport
+        working-directory: apps/mobile
+        run: |
+          set -euo pipefail
+          workspace="$(find ios -maxdepth 1 -name '*.xcworkspace' | head -n 1)"
+          test -n "$workspace"
+          scheme="$(basename "$workspace" .xcworkspace)"
+          mkdir -p ../../ios-tunnel-evidence
+          xcodebuild -workspace "$workspace" -scheme "$scheme" \
+            -derivedDataPath "$PWD/ios-tunnel-derived" -sdk iphoneos \
+            -destination 'generic/platform=iOS' -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee ../../ios-tunnel-evidence/BUILD.txt
+          app="$(find ios-tunnel-derived/Build/Products/Debug-iphoneos -maxdepth 1 -name '*.app' | head -n 1)"
+          test -n "$app"
+          test -d "$app/PlugIns/KicksPacketTunnel.appex"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+            "$app/PlugIns/KicksPacketTunnel.appex/Info.plist" | grep -Fx com.datastorm.kicks.PacketTunnel
+          git rev-parse HEAD > ../../ios-tunnel-evidence/SOURCE_COMMIT.txt
+          xcodebuild -version > ../../ios-tunnel-evidence/XCODE.txt
+          go version > ../../ios-tunnel-evidence/GO.txt
+          find ios-tunnel-derived -name Package.resolved -exec cp {} ../../ios-tunnel-evidence/ \;
+      - name: Preserve compilation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kicks-unsigned-ios-tunnel-${{ github.run_number }}
+          path: ios-tunnel-evidence/
+          if-no-files-found: warn
+          retention-days: 14

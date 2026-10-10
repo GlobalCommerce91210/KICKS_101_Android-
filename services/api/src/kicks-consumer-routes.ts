@@ -7,6 +7,7 @@ import type { ConsumerDeviceBindingStore } from './consumer-device-bindings.js';
 import type { PermissionsEngine } from './permissions.js';
 import type { Store } from './store.js';
 import type { WalletEngine } from './wallet.js';
+import type { IosGatewayEnrollment } from './ios-gateway-enrollment.js';
 
 export interface KicksConsumerRouteDependencies {
   identityStore: ConsumerIdentityStore;
@@ -15,6 +16,7 @@ export interface KicksConsumerRouteDependencies {
   permissionsEngine: PermissionsEngine;
   walletEngine: WalletEngine;
   complianceEngine: ComplianceEngine;
+  iosGateway?: { enrollment: IosGatewayEnrollment; authenticateAuthority: (authorization: string | undefined) => Promise<boolean> };
 }
 
 const bearer = (authorization?: string) => {
@@ -375,6 +377,29 @@ export function registerKicksConsumerRoutes(
     const binding = bindings.find(item => item.device_id === deviceId && item.status === 'active');
     return { consumer, binding };
   };
+
+  // Disabled unless explicitly wired to a staging authority and a durable lease store.
+  app.post('/core/consumer/v1/devices/:deviceId/ios-gateway-lease', async (request, reply) => {
+    const gateway = dependencies.iosGateway;
+    if (!gateway) return reply.code(503).send({ error: 'ios_gateway_not_configured' });
+    const { deviceId } = request.params as { deviceId: string };
+    const authorized = await accountBinding(request.headers.authorization, deviceId);
+    if (!authorized) return reply.code(401).send({ error: 'unauthorized' });
+    if (!authorized.binding || authorized.binding.platform !== 'ios') return reply.code(404).send({ error: 'ios_device_binding_not_found' });
+    const input = z.object({ permissionId: z.string().uuid(), publicKey: z.string().length(44), deviceToken: z.string().min(16).max(4096) }).strict().safeParse(request.body);
+    if (!input.success) return reply.code(422).send({ error: 'validation_error' });
+    try {
+      return await gateway.enrollment.enroll({ ...input.data, accountSubjectId: authorized.consumer.subjectId, deviceId });
+    } catch {
+      return reply.code(403).send({ error: 'gateway_enrollment_denied' });
+    }
+  });
+  app.get('/internal/staging/ios-gateway/peers', async (request, reply) => {
+    const gateway = dependencies.iosGateway;
+    if (!gateway || !await gateway.authenticateAuthority(request.headers.authorization)) return reply.code(401).send({ error: 'unauthorized' });
+    // Any authority/DB failure propagates as failure: reconciler removes all peers.
+    return gateway.enrollment.peers();
+  });
 
   app.get('/core/consumer/v1/devices/:deviceId/consent', async (request, reply) => {
     const { deviceId } = request.params as { deviceId: string };

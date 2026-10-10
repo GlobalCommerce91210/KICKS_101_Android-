@@ -8,6 +8,33 @@ import { PostgresStore } from './store.js';
 import { PostgresConsumerIdentityStore } from './consumer-identity-postgres.js';
 import { PostgresConsumerDeviceBindingStore } from './consumer-device-bindings.js';
 import { SessionManager } from '../../../apps/mobile/services/sessionCore.js';
+import { PostgresGatewayLeaseStore } from './ios-gateway-enrollment.js';
+
+test('PostgreSQL gateway lease allocation survives restart, serializes competing addresses and rejects key reuse', { skip: !process.env.KICKS_TEST_DATABASE_URL }, async () => {
+  const schema = 'test_gateway_' + randomUUID().replaceAll('-', '');
+  const admin = new Pool({ connectionString: process.env.KICKS_TEST_DATABASE_URL });
+  await admin.query('CREATE SCHEMA ' + schema);
+  const url = new URL(process.env.KICKS_TEST_DATABASE_URL!);
+  url.searchParams.set('options', '-c search_path=' + schema);
+  let pool = new Pool({ connectionString: url.toString() });
+  const now = Date.now();
+  const input = { accountSubjectId:'synthetic-account',deviceId:'one',tokenHash:'synthetic-hash',publicKey:Buffer.alloc(32,1).toString('base64'),
+    permissionId:randomUUID(),activationId:randomUUID(),purposeVersion:'one',expiresAt:new Date(now+300_000).toISOString() };
+  try {
+    let leases = new PostgresGatewayLeaseStore(pool);
+    const first = await leases.upsert(input, now);
+    await pool.end();
+    pool = new Pool({ connectionString: url.toString() });
+    leases = new PostgresGatewayLeaseStore(pool);
+    assert.equal((await leases.list(now))[0]?.slot, first.slot);
+    const competing = await Promise.all([2,3].map(n=>leases.upsert({...input,deviceId:'device-'+n,publicKey:Buffer.alloc(32,n).toString('base64')},now)));
+    assert.equal(new Set([first.slot,...competing.map(l=>l.slot)]).size,3);
+    await assert.rejects(leases.upsert({...input,deviceId:'other'},now));
+    await assert.rejects(leases.upsert({...input,accountSubjectId:'other'},now),/device_lease_in_use/);
+    assert.equal((await leases.list(now)).length,3);
+    assert.equal((await leases.list(now+300_000)).length,0);
+  } finally { await pool.end(); await admin.query('DROP SCHEMA '+schema+' CASCADE'); await admin.end(); }
+});
 
 test('PostgreSQL retains mobile account, refresh session, collector binding, consent and accepted metadata across server restart', { skip: !process.env.KICKS_TEST_DATABASE_URL }, async t => {
   const schema = 'test_consent_' + randomUUID().replaceAll('-', '');

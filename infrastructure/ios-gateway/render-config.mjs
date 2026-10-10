@@ -19,8 +19,15 @@ export function renderGateway(config, now = Date.now()) {
     if (!Number.isFinite(expires) || expires <= now || expires > now + 300_000)
       throw new Error('authorization_lease_required');
     if (seenKeys.has(peer.publicKey) || seenAddresses.has(peer.address)) throw new Error('duplicate_peer');
+    let allowed = `${peer.address}/32`;
+    if (peer.addressIPv6 !== undefined) {
+      const suffix = Number(peer.address.split('.')[3]).toString(16);
+      if (peer.addressIPv6 !== `fd88:4b49:434b::${suffix}` || isIP(peer.addressIPv6) !== 6)
+        throw new Error('invalid_ipv6_peer_address');
+      allowed += `, ${peer.addressIPv6}/128`;
+    }
     seenKeys.add(peer.publicKey); seenAddresses.add(peer.address);
-    sections.push('', '[Peer]', `PublicKey = ${peer.publicKey}`, `AllowedIPs = ${peer.address}/32`);
+    sections.push('', '[Peer]', `PublicKey = ${peer.publicKey}`, `AllowedIPs = ${allowed}`);
   }
   return sections.join('\n') + '\n';
 }

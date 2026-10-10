@@ -123,6 +123,9 @@ private final class KicksTunnelController {
         let settings = NETunnelProviderProtocol()
         settings.providerBundleIdentifier = extensionId
         settings.serverAddress = config.tunnelServerHost
+        settings.includeAllNetworks = true
+        settings.excludeLocalNetworks = false
+        settings.enforceRoutes = true
         // Only a Keychain reference crosses into the OS profile, never a token.
         settings.passwordReference = try readKeychain(reference: true)
         settings.providerConfiguration = ["schemaVersion": 1, "deviceId": config.deviceId,

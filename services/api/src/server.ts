@@ -164,6 +164,7 @@ export function buildServer(options: {
   blogComplianceGateway?: BlogComplianceGateway;
   consumerIdentityStore?: ConsumerIdentityStore;
   consumerDeviceBindingStore?: ConsumerDeviceBindingStore;
+  iosGateway?: import('./kicks-consumer-routes.js').KicksConsumerRouteDependencies['iosGateway'];
 } = {}) {
   const databaseUrl = process.env.DATABASE_URL ?? process.env.KICKS_DATABASE_URL;
   const environment = resolveRuntimeEnvironment({
@@ -236,6 +237,7 @@ export function buildServer(options: {
     permissionsEngine,
     walletEngine,
     complianceEngine,
+    iosGateway: environment === 'staging' ? options.iosGateway : undefined,
   });
 
   const authenticateAdmin = (suppliedSecret: string) => Boolean(adminSecret)
