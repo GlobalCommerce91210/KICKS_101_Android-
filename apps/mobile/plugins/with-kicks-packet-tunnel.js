@@ -71,6 +71,12 @@ module.exports = function withKicksPacketTunnel(config) {
         MARKETING_VERSION: mainSettings.MARKETING_VERSION ?? '0.2.6',
         DEVELOPMENT_TEAM: mainSettings.DEVELOPMENT_TEAM ?? '""',
         LIBRARY_SEARCH_PATHS: ['"$(inherited)"', '"$(CONFIGURATION_BUILD_DIR)"'],
+        // Xcode 26 does not propagate this pinned package's root-level custom
+        // Clang module maps to Swift consumers. Reference the original maps.
+        OTHER_SWIFT_FLAGS: ['"$(inherited)"', '"-Xcc"',
+          '"-fmodule-map-file=$(SRCROOT)/vendor/wireguard-apple/Sources/WireGuardKitC/module.modulemap"',
+          '"-Xcc"',
+          '"-fmodule-map-file=$(SRCROOT)/vendor/wireguard-apple/Sources/WireGuardKitGo/module.modulemap"'],
         ENABLE_BITCODE: 'NO', ENABLE_USER_SCRIPT_SANDBOXING: 'NO',
       });
     }
