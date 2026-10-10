@@ -56,7 +56,10 @@ jobs:
           set -euo pipefail
           workspace="$(find ios -maxdepth 1 -name '*.xcworkspace' | head -n 1)"
           test -n "$workspace"
-          scheme="$(xcodebuild -list -json -workspace "$workspace" | python3 -c 'import json,sys; print(json.load(sys.stdin)["workspace"]["schemes"][0])')"
+          # Build the containing app, never the first CocoaPods dependency scheme.
+          scheme="$(basename "$workspace" .xcworkspace)"
+          xcodebuild -list -json -workspace "$workspace" |
+            python3 -c 'import json,sys; assert sys.argv[1] in json.load(sys.stdin)["workspace"]["schemes"], "App scheme missing"' "$scheme"
           xcodebuild -workspace "$workspace" -scheme "$scheme" -sdk iphonesimulator -configuration Debug -derivedDataPath ../../ios-derived-data CODE_SIGNING_ALLOWED=NO build
       - name: Record provenance
         if: always()
