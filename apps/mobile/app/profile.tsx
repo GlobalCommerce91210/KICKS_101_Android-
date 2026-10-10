@@ -46,7 +46,6 @@ function ConsumerProfile() {
 
   useEffect(() => {
     setProfile(null); setError(null);
-    if (ready && !user) router.replace('/account');
   }, [ready, user]);
 
   useFocusEffect(useCallback(() => {
@@ -54,7 +53,15 @@ function ConsumerProfile() {
     return () => { ++requestId.current; };
   }, [ready, user, refresh]));
 
-  if (ready && !user) return null;
+  if (ready && !user) return <Screen>
+    <BrandHeader section="DataStorm consumer profile" />
+    <Text style={ui.title}>Connect your DataStorm account</Text>
+    <Card>
+      <Text style={ui.body}>Sign in to view your KICK’S profile, devices, permissions, consent history and wallet. Monitoring remains off until separately authorized.</Text>
+      <Pressable accessibilityRole="button" onPress={() => router.push('/account')}><Text style={s.link}>Sign in to DataStorm</Text></Pressable>
+    </Card>
+    <Pressable accessibilityRole="button" onPress={() => router.push('/settings')}><Text style={s.secondary}>Back to Settings</Text></Pressable>
+  </Screen>;
   if (!ready || (loading && !profile)) {
     return <Screen><BrandHeader section="Consumer profile" /><Card><ActivityIndicator color={colors.orange} /><Text style={ui.body}>Loading your DataStorm account…</Text></Card></Screen>;
   }
