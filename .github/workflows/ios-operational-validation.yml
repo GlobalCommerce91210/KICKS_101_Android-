@@ -71,10 +71,17 @@ jobs:
           name: ios-operational-evidence-${{ github.sha }}
           path: ios-operational-evidence/
           retention-days: 14
+      - name: Archive unsigned simulator app with executable permissions
+        run: |
+          set -euo pipefail
+          products="ios-derived-data/Build/Products/Debug-iphonesimulator"
+          app="$(find "$products" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$app"
+          tar -czf ios-operational-simulator-app.tar.gz -C "$products" "$(basename "$app")"
       - name: Retain unsigned simulator app for runtime validation
         uses: actions/upload-artifact@v4
         with:
           name: ios-operational-simulator-app-${{ github.sha }}
-          path: ios-derived-data/Build/Products/Debug-iphonesimulator/*.app/
+          path: ios-operational-simulator-app.tar.gz
           if-no-files-found: error
           retention-days: 7
