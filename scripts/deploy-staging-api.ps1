@@ -19,6 +19,7 @@ function Assert-Administrator {
 
 function Assert-HttpStatus {
   param([string]$Url, [int]$Expected)
+  $phase = "public-registration-validation"
   $tmp = [System.IO.Path]::GetTempFileName()
   try {
     $status = & curl.exe -sS -o $tmp -w "%{http_code}" --connect-timeout 5 --max-time 15 $Url
@@ -160,8 +161,10 @@ try {
 $startedProcess = $null
 $logRoot = Join-Path $RepoRoot ".staging"
 New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
+$phase = "runtime-start"
 
 try {
+  $phase = "runtime-start"
   if ($runtime.Kind -eq "service") {
     Restart-Service -Name $ServiceName -Force
     $svc = Get-Service -Name $ServiceName
@@ -186,9 +189,11 @@ try {
     }
   }
 
+  $phase = "local-health"
   Assert-HttpStatus "$LocalOrigin/health" 200
   Assert-HttpStatus "$LocalOrigin/core/identity/v1/account" 401
   Assert-HttpStatus "$LocalOrigin/core/consumer/v1/profile" 401
+  $phase = "public-health"
   Assert-HttpStatus "$PublicOrigin/health" 200
   Assert-HttpStatus "$PublicOrigin/core/identity/v1/account" 401
   Assert-HttpStatus "$PublicOrigin/core/consumer/v1/profile" 401
@@ -206,10 +211,17 @@ try {
 
   Write-Host "Staging API deployment and public onboarding boundary verified at $candidate"
 } catch {
-  Write-Warning "Deployment verification failed. Rolling back source to $previous."
+  Write-Error "Staging deployment failed during phase '$phase': $($_.Exception.Message)"
   if ($startedProcess -and -not $startedProcess.HasExited) { Stop-Process -Id $startedProcess.Id -Force -ErrorAction SilentlyContinue }
-  git checkout --detach $previous
-  npm ci
+
+  if ($previous -ne $candidate) {
+    Write-Warning "Rolling back source from $candidate to $previous."
+    git checkout --detach $previous
+    npm ci
+  } else {
+    Write-Warning "Source is already at the pre-deploy commit $previous; no source rollback is required."
+  }
+
   if ($runtime.Kind -eq "service") { Restart-Service -Name $ServiceName -Force }
   throw
 }
