@@ -36,10 +36,62 @@ if (-not $RepoRoot) {
   catch { throw "Run this script from the KICK'S repository or pass -RepoRoot explicitly." }
 }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
-$service = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'"
-if (-not $service) { throw "Windows service $ServiceName was not found." }
-Write-Host "Service command: $($service.PathName)"
-Write-Host "Service state before deploy: $($service.State)"
+
+function Resolve-StagingRuntime {
+  param([string]$PreferredServiceName)
+
+  $preferred = Get-CimInstance Win32_Service -Filter "Name='$PreferredServiceName'" -ErrorAction SilentlyContinue
+  if ($preferred) {
+    return [pscustomobject]@{ Kind='service'; Service=$preferred; Process=$null; Tasks=@() }
+  }
+
+  $listener = Get-NetTCPConnection -State Listen -LocalPort 3000 -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($listener) {
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue
+    $ownerService = Get-CimInstance Win32_Service -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($ownerService) {
+      return [pscustomobject]@{ Kind='service'; Service=$ownerService; Process=$process; Tasks=@() }
+    }
+
+    $tasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
+      $_.TaskName -match 'KICKS|DataStorm|Staging|API' -or $_.TaskPath -match 'KICKS|DataStorm'
+    })
+    return [pscustomobject]@{ Kind='process'; Service=$null; Process=$process; Tasks=$tasks }
+  }
+
+  $candidateServices = @(Get-CimInstance Win32_Service | Where-Object {
+    $_.Name -match 'KICKS|DataStorm|Staging|API' -or $_.DisplayName -match 'KICKS|DataStorm|Staging|API'
+  })
+  if ($candidateServices.Count -eq 1) {
+    return [pscustomobject]@{ Kind='service'; Service=$candidateServices[0]; Process=$null; Tasks=@() }
+  }
+
+  return [pscustomobject]@{ Kind='unknown'; Service=$null; Process=$null; Tasks=@(); CandidateServices=$candidateServices }
+}
+
+$runtime = Resolve-StagingRuntime -PreferredServiceName $ServiceName
+if ($runtime.Kind -eq 'service') {
+  $service = $runtime.Service
+  $ServiceName = $service.Name
+  Write-Host "Resolved staging Windows service: $ServiceName"
+  Write-Host "Service command: $($service.PathName)"
+  Write-Host "Service state before deploy: $($service.State)"
+} elseif ($runtime.Kind -eq 'process') {
+  Write-Warning "Port 3000 is owned by PID $($runtime.Process.ProcessId), but that PID is not registered as a Windows service."
+  Write-Host "Process: $($runtime.Process.Name)"
+  Write-Host "Command line: $($runtime.Process.CommandLine)"
+  if ($runtime.Tasks.Count -gt 0) {
+    Write-Host "Related scheduled tasks:"
+    $runtime.Tasks | Select-Object TaskName,TaskPath,State | Format-Table -AutoSize
+  }
+  throw "Staging is running as a standalone process or scheduled task. Refusing to kill/recreate it without preserving its launch environment."
+} else {
+  if ($runtime.CandidateServices -and $runtime.CandidateServices.Count -gt 0) {
+    Write-Host "Possible staging services:"
+    $runtime.CandidateServices | Select-Object Name,DisplayName,State,PathName | Format-Table -AutoSize
+  }
+  throw "No staging runtime was found on port 3000 and no unique KICKS/DataStorm service could be resolved."
+}
 Write-Host "Repository root: $RepoRoot"
 
 $nssmKey = $null
