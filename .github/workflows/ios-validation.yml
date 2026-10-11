@@ -61,6 +61,12 @@ jobs:
           if (env.EXPO_PUBLIC_IOS_API_URL !== 'https://staging-api.datastorminc.live') {
             throw new Error('ios-device must target the approved staging API origin');
           }
+          if (env.EXPO_PUBLIC_TERMS_VERSION !== 'KC-CON-01-v1.0') {
+            throw new Error('ios-device must carry the approved KC-CON-01-v1.0 terms version');
+          }
+          if (env.EXPO_PUBLIC_PRIVACY_VERSION !== 'KC-CON-02-v1.0') {
+            throw new Error('ios-device must carry the approved KC-CON-02-v1.0 privacy version');
+          }
           NODE
 
       - name: Generate iOS native project
