@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/start.ts",
+    "build:runtime": "tsc --project tsconfig.staging-runtime.json && node scripts/copy-runtime-assets.mjs",
     "start": "tsx src/start.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test src/*.test.ts"

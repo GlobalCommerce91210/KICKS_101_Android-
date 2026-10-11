@@ -26,6 +26,9 @@ jobs:
       - name: Typecheck workspaces
         run: npm run typecheck
 
+      - name: Compile and start the emitted staging API
+        run: npm run build:runtime --workspace @kicks/api && node scripts/verify-staging-runtime.mjs
+
       - name: Parse staging deployment PowerShell
         shell: pwsh
         run: |
