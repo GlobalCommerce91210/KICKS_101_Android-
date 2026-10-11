@@ -5,15 +5,9 @@ import { selectIosNativeAdapter } from '../services/iosNativeAdapter.mjs';
 import { randomUUID } from 'expo-crypto';
 import { Card, ui } from './Brand';
 import { useSession } from './SessionProvider';
+import { useMonitoringPolicy } from './useMonitoringPolicy';
 import { activateIosCollector, type BoundCollectorConsent } from '../services/iosCollectorActivation.mjs';
 
-const policy = {
-  permissionId: process.env.EXPO_PUBLIC_MONITORING_PERMISSION_ID ?? '',
-  policyVersion: process.env.EXPO_PUBLIC_MONITORING_POLICY_VERSION ?? '',
-  purposeVersion: process.env.EXPO_PUBLIC_MONITORING_PURPOSE_VERSION ?? '',
-  purpose: process.env.EXPO_PUBLIC_MONITORING_PURPOSE ?? '',
-};
-const configured = Object.values(policy).every(Boolean);
 const states: Record<string, string> = {
   off: 'Monitoring is off.', vpn_authorization: 'Waiting for iOS VPN permission.',
   connected_waiting_for_evidence: 'VPN connected. Collection has not been verified.',
@@ -21,6 +15,7 @@ const states: Record<string, string> = {
 };
 export function IosCollectorControls() {
   const { manager, user } = useSession();
+  const { policy, configured } = useMonitoringPolicy();
   const [state, setState] = useState('off');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -104,6 +99,10 @@ export function IosCollectorControls() {
   }, []);
   useEffect(() => {
     if (!usableNative || !['collecting', 'connected_waiting_for_evidence'].includes(state)) return;
+    if (!configured) {
+      void stop().catch(() => { setState('stop_unconfirmed'); setError('Turn off KICK’S VPN in iOS Settings.'); });
+      return;
+    }
     let checking = false; let live = true;
     const verify = async () => {
       if (checking || !live) return;
@@ -129,7 +128,7 @@ export function IosCollectorControls() {
     void verify();
     const interval = setInterval(() => { void verify(); }, 15_000);
     return () => { live = false; clearInterval(interval); };
-  }, [user?.subjectId, state]);
+  }, [user?.subjectId, state, configured, policy.permissionId, policy.policyVersion, policy.purposeVersion, policy.purpose]);
   return <Card accent>
     <Text style={ui.h2}>Network monitoring</Text>
     <Text accessibilityRole="alert" style={ui.body}>{states[state] ?? 'Checking collector status.'}</Text>

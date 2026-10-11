@@ -61,7 +61,7 @@ module.exports = function withKicksPacketTunnel(config) {
     // Put this phase first on the extension target and declare its archive output
     // so Xcode has an explicit pre-link dependency instead of a best-effort script.
     const wireGuardPhase = project.addBuildPhase([], 'PBXShellScriptBuildPhase', 'Build WireGuard Go bridge', extension.uuid, {
-      shellPath: '/bin/sh', shellScript: 'set -eu\\n' +
+      shellPath: '/bin/sh', shellScript: require('./go-bootstrap') +
         'test "$PLATFORM_NAME" = iphoneos || { echo "KICKS tunnel validation requires iphoneos; simulator unsupported" >&2; exit 1; }\\n' +
         'go version | grep -Eq "go1\\\\.19([. ]|$)" || { echo "Pinned WireGuard bridge requires Go 1.19" >&2; exit 1; }\\n' +
         'WG_SOURCE="$SRCROOT/vendor/wireguard-apple/Sources/WireGuardKitGo"\\n' +
@@ -86,7 +86,7 @@ module.exports = function withKicksPacketTunnel(config) {
         INFOPLIST_FILE: `"${TARGET}/${TARGET}-Info.plist"`,
         CURRENT_PROJECT_VERSION: mainSettings.CURRENT_PROJECT_VERSION ?? '1',
         MARKETING_VERSION: mainSettings.MARKETING_VERSION ?? '0.2.6',
-        DEVELOPMENT_TEAM: mainSettings.DEVELOPMENT_TEAM ?? '""',
+        DEVELOPMENT_TEAM: mainSettings.DEVELOPMENT_TEAM || config.ios?.appleTeamId || '""',
         LIBRARY_SEARCH_PATHS: ['"$(inherited)"', '"$(CONFIGURATION_BUILD_DIR)"', '"$(SRCROOT)/vendor/wireguard-apple/Sources/WireGuardKitGo/out"'],
         // Xcode 26 does not propagate this pinned package's root-level custom
         // Clang module maps to Swift consumers. Reference the original maps.

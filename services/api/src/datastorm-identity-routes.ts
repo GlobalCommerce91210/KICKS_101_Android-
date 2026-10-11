@@ -115,6 +115,9 @@ export function registerDataStormIdentityRoutes(
     if (!parsed.success) {
       return reply.code(422).send({ error: 'validation_error', message: 'Account request failed validation.', request_id: request.id });
     }
+    if (!notifyToken && process.env.NODE_ENV !== 'test') {
+      return reply.code(503).send({ error: 'identity_delivery_unavailable', message: 'Account setup is temporarily unavailable.', request_id: request.id });
+    }
 
     const idempotencyKey = String(request.headers['idempotency-key'] ?? '').trim();
     if (idempotencyKey.length < 16 || idempotencyKey.length > 128) {
@@ -157,6 +160,7 @@ export function registerDataStormIdentityRoutes(
   app.post('/core/identity/v1/email-verification/request', async (request, reply) => {
     const parsed = resetRequest.safeParse(request.body);
     if (!parsed.success) return reply.code(422).send({ error: 'validation_error', request_id: request.id });
+    if (!notifyToken && process.env.NODE_ENV !== 'test') return reply.code(503).send({ error: 'identity_delivery_unavailable', request_id: request.id });
     const account = await identityStore.findAccountByEmail(parsed.data.email);
     const raw = account && account.account_status !== 'closed'
       ? await deliver(account.subject_id, account.email, 'email_verification', 24 * 60 * 60 * 1000)
@@ -177,6 +181,7 @@ export function registerDataStormIdentityRoutes(
   app.post('/core/identity/v1/password-reset/request', async (request, reply) => {
     const parsed = resetRequest.safeParse(request.body);
     if (!parsed.success) return reply.code(422).send({ error: 'validation_error', request_id: request.id });
+    if (!notifyToken && process.env.NODE_ENV !== 'test') return reply.code(503).send({ error: 'identity_delivery_unavailable', request_id: request.id });
     const account = await identityStore.findAccountByEmail(parsed.data.email);
     const raw = account && account.account_status !== 'closed'
       ? await deliver(account.subject_id, account.email, 'password_reset', 30 * 60 * 1000)

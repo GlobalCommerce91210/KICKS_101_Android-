@@ -24,7 +24,11 @@ export interface ConsumerProfileView {
 
 async function readJson(response: Response, label: string): Promise<JsonObject> {
   if (!response.ok) throw new SessionError(`${label} is unavailable (HTTP ${response.status}).`);
-  try { return await response.json(); }
+  try {
+    const value = await response.json();
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error();
+    return value;
+  }
   catch { throw new SessionError(`${label} returned an invalid response.`); }
 }
 
@@ -81,7 +85,9 @@ export async function loadConsumerProfile(manager: SessionManager): Promise<Cons
     optionalJson(manager, '/core/consumer/v1/wallet', 'wallet', unavailable)
   ]);
 
-  const devices = Array.isArray(devicesView) ? devicesView : Array.isArray(devicesView?.devices) ? devicesView.devices : [];
+  const rawDevices = Array.isArray(devicesView) ? devicesView : Array.isArray(devicesView?.devices) ? devicesView.devices : [];
+  const devices = rawDevices.filter((item: unknown) => item !== null && typeof item === 'object' && !Array.isArray(item));
+  if (devices.length !== rawDevices.length) unavailable.push('connected devices');
   const consentLog = Array.isArray(consent) ? consent : Array.isArray(consent?.items) ? consent.items : [];
   const monitoring = snapshot?.monitoring && typeof snapshot.monitoring === 'object' ? snapshot.monitoring : null;
 

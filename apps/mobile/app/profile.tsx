@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, type ErrorBoundaryProps } from 'expo-router';
 import { BrandHeader, Card, Screen, colors, ui } from '../components/Brand';
 import { useSession } from '../components/SessionProvider';
 import { loadConsumerProfile, type ConsumerProfileView } from '../services/profileService';
@@ -21,8 +21,17 @@ export default function Profile() {
   return <ConsumerProfile />;
 }
 
+export function ErrorBoundary({ retry }: ErrorBoundaryProps) {
+  return <Screen><BrandHeader section="Consumer profile" /><Card>
+    <Text accessibilityRole="alert" style={ui.h2}>Your profile is temporarily unavailable.</Text>
+    <Text style={ui.body}>Try loading it again or open your DataStorm account.</Text>
+    <Pressable accessibilityRole="button" onPress={retry} style={s.action}><Text style={s.link}>Try again</Text></Pressable>
+    <Pressable accessibilityRole="button" onPress={() => router.push('/account')} style={s.action}><Text style={s.link}>Open account</Text></Pressable>
+  </Card></Screen>;
+}
+
 function ConsumerProfile() {
-  const { manager, user, ready } = useSession();
+  const { manager, user, ready, restoreError } = useSession();
   const [loadedProfile, setProfile] = useState<ConsumerProfileView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,19 +55,26 @@ function ConsumerProfile() {
 
   useEffect(() => {
     setProfile(null); setError(null);
-    if (ready && !user) router.replace('/account');
-  }, [ready, user]);
+  }, [user?.subjectId]);
 
   useFocusEffect(useCallback(() => {
     if (ready && user) void refresh();
     return () => { ++requestId.current; };
   }, [ready, user, refresh]));
 
-  if (ready && !user) return null;
   if (!ready || (loading && !profile)) {
     return <Screen><BrandHeader section="Consumer profile" /><Card><ActivityIndicator color={colors.orange} /><Text style={ui.body}>Loading your DataStorm account…</Text></Card></Screen>;
   }
-  if (!user) return null;
+  if (!user) return <Screen>
+    <BrandHeader section="DataStorm consumer profile" />
+    <Text style={ui.title}>Connect your account.</Text>
+    <Card accent>
+      <Text style={ui.h2}>Your KICK’S profile starts with DataStorm.</Text>
+      <Text style={ui.body}>Sign in or create an account to review your profile, connected devices, permissions and wallet.</Text>
+      {restoreError && <Text accessibilityRole="alert" style={s.error}>{restoreError}</Text>}
+      <Pressable accessibilityRole="button" style={s.action} onPress={() => router.push('/account')}><Text style={s.link}>Sign in or create account</Text></Pressable>
+    </Card>
+  </Screen>;
 
   const activePermissions = profile?.permissions ? countOf((profile.permissions as any).apps) : null;
   const revoked = typeof (profile?.snapshot as any)?.permissions?.revoked === 'number' ? (profile?.snapshot as any).permissions.revoked : null;
@@ -95,7 +111,7 @@ function ConsumerProfile() {
       <Text style={ui.body}>Device and collector IDs are operational identities. They do not replace your DataStorm consumer account.</Text>
       {profile?.devices.slice(0, 4).map((device: any, index) =>
         <View key={String(device.device_id ?? device.id ?? index)} style={s.device}>
-          <Text style={s.deviceTitle}>{device.name ?? device.device_name ?? `Device ${index + 1}`}</Text>
+          <Text style={s.deviceTitle}>{typeof device.display_name === 'string' ? device.display_name : typeof device.name === 'string' ? device.name : typeof device.device_name === 'string' ? device.device_name : `Device ${index + 1}`}</Text>
           <Text style={ui.body}>Collector: {statusText(device.collector_status)} · Monitoring: {statusText(device.monitoring_status)}</Text>
         </View>
       )}
@@ -138,5 +154,6 @@ const s = StyleSheet.create({
   subject: { color: '#786961', fontSize: 10, marginTop: 4 },
   error: { color: colors.red, fontSize: 14, lineHeight: 21 },
   device: { borderTopWidth: 1, borderTopColor: '#282329', paddingTop: 10, marginTop: 4 },
-  deviceTitle: { color: colors.text, fontWeight: '800' }
+  deviceTitle: { color: colors.text, fontWeight: '800' },
+  action: { minHeight: 44, justifyContent: 'center' }
 });
