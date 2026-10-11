@@ -1,5 +1,5 @@
 param(
-  [Parameter(Mandatory=$true)][string]$RepoRoot,
+  [string]$RepoRoot = "",
   [string]$Branch = "implementation/consumer-onboarding-20261010",
   [string]$ServiceName = "DataStormKicksStagingApi",
   [string]$LocalOrigin = "http://127.0.0.1:3000",
@@ -31,10 +31,28 @@ function Assert-HttpStatus {
 }
 
 Assert-Administrator
+if (-not $RepoRoot) {
+  try { $RepoRoot = (git rev-parse --show-toplevel).Trim() }
+  catch { throw "Run this script from the KICK'S repository or pass -RepoRoot explicitly." }
+}
+$RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 $service = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'"
 if (-not $service) { throw "Windows service $ServiceName was not found." }
 Write-Host "Service command: $($service.PathName)"
 Write-Host "Service state before deploy: $($service.State)"
+Write-Host "Repository root: $RepoRoot"
+
+if ($service.PathName -match 'nssm') {
+  $nssmKey = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName\Parameters"
+  if (Test-Path $nssmKey) {
+    $nssm = Get-ItemProperty $nssmKey
+    Write-Host "NSSM application: $($nssm.Application)"
+    Write-Host "NSSM app directory: $($nssm.AppDirectory)"
+    if ($nssm.AppDirectory -and ((Resolve-Path -LiteralPath $nssm.AppDirectory).Path -ne $RepoRoot)) {
+      throw "The Windows service points at a different app directory. Do not restart against the wrong checkout."
+    }
+  }
+}
 
 Set-Location -LiteralPath $RepoRoot
 $previous = (git rev-parse HEAD).Trim()
