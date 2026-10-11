@@ -42,14 +42,23 @@ Write-Host "Service command: $($service.PathName)"
 Write-Host "Service state before deploy: $($service.State)"
 Write-Host "Repository root: $RepoRoot"
 
+$nssmKey = $null
+$previousNssmDirectory = $null
+$serviceDirectoryChanged = $false
 if ($service.PathName -match 'nssm') {
   $nssmKey = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName\Parameters"
   if (Test-Path $nssmKey) {
     $nssm = Get-ItemProperty $nssmKey
     Write-Host "NSSM application: $($nssm.Application)"
     Write-Host "NSSM app directory: $($nssm.AppDirectory)"
-    if ($nssm.AppDirectory -and ((Resolve-Path -LiteralPath $nssm.AppDirectory).Path -ne $RepoRoot)) {
-      throw "The Windows service points at a different app directory. Do not restart against the wrong checkout."
+    $previousNssmDirectory = $nssm.AppDirectory
+    if ($nssm.AppDirectory) {
+      $resolvedServiceRoot = (Resolve-Path -LiteralPath $nssm.AppDirectory).Path
+      if ($resolvedServiceRoot -ne $RepoRoot) {
+        Write-Warning "NSSM service points at stale checkout $resolvedServiceRoot. Repointing to $RepoRoot."
+        Set-ItemProperty -LiteralPath $nssmKey -Name AppDirectory -Value $RepoRoot
+        $serviceDirectoryChanged = $true
+      }
     }
   }
 }
@@ -100,6 +109,10 @@ try {
   Write-Warning "Deployment verification failed. Rolling back to $previous"
   git checkout --detach $previous
   npm ci
+  if ($serviceDirectoryChanged -and $nssmKey -and $previousNssmDirectory) {
+    Write-Warning "Restoring previous NSSM AppDirectory: $previousNssmDirectory"
+    Set-ItemProperty -LiteralPath $nssmKey -Name AppDirectory -Value $previousNssmDirectory
+  }
   Restart-Service -Name $ServiceName -Force
   throw
 }
