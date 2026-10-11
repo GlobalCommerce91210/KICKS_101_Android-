@@ -40,6 +40,7 @@ public final class KicksTunnelModule: Module {
 private struct NativeConfiguration: Decodable {
     let deviceId: String
     let permissionId: String
+    let activationId: String
     let tunnelServerHost: String
     let expiresAt: Date
 }
@@ -298,6 +299,7 @@ private final class KicksTunnelController {
         do { config = try decoder.decode(NativeConfiguration.self, from: readKeychain()) }
         catch { throw CollectorFailure(message: "The native enrollment must include a device binding and expiring authorization. Existing credentials were preserved.") }
         guard UUID(uuidString: config.deviceId) != nil, UUID(uuidString: config.permissionId) != nil,
+              UUID(uuidString: config.activationId) != nil,
               !config.tunnelServerHost.isEmpty,
               config.expiresAt > Date(), config.expiresAt.timeIntervalSinceNow <= 300 else {
             throw CollectorFailure(message: "The collector enrollment is incomplete or expired. Monitoring remains off.")
@@ -378,6 +380,13 @@ private final class KicksTunnelController {
             throw CollectorFailure(message: "The VPN profile does not match this iPad’s current enrollment.")
         }
         try session.startVPNTunnel()
+        // startVPNTunnel schedules connection; do not inspect it as if synchronous.
+        for _ in 0..<100 {
+            if profile.connection.status == .connected { return }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        profile.connection.stopVPNTunnel()
+        throw CollectorFailure(message: "KICK’S VPN did not connect in time. Monitoring was stopped.")
     }
 
     func stop() async throws {
@@ -392,11 +401,44 @@ private final class KicksTunnelController {
 
     func status() async throws -> [String: Any] {
         let profiles = try await managers()
-        let connected = profiles.contains { [.connected, .connecting, .reasserting, .disconnecting].contains($0.connection.status) }
-        // OS connectivity is insufficient to assert verified consent or ingestion.
-        // The extension evidence protocol must be implemented before enabling this.
-        return ["deviceId": (try? configuration().deviceId) ?? "",
-                "permissionId": (try? configuration().permissionId) ?? "",
-                "connected": connected, "consentVerified": false, "collecting": false]
+        // Transitional states remain visible so Stop cannot falsely confirm success.
+        let active = profiles.contains { ![.disconnected, .invalid].contains($0.connection.status) }
+        let unavailable: [String: Any] = ["connected": active, "consentVerified": false, "collecting": false]
+        guard profiles.count == 1, let profile = profiles.first,
+              profile.connection.status == .connected,
+              let config = try? configuration(),
+              let session = profile.connection as? NETunnelProviderSession else { return unavailable }
+        let data: Data? = await withCheckedContinuation { continuation in
+            let reply = TunnelStatusReply(continuation)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3) { reply.finish(nil) }
+            do { try session.sendProviderMessage(Data("status-v1".utf8)) { reply.finish($0) } }
+            catch { reply.finish(nil) }
+        }
+        guard let data, data.count <= 4096,
+              let evidence = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              evidence["deviceId"] as? String == config.deviceId,
+              evidence["permissionId"] as? String == config.permissionId,
+              evidence["activationId"] as? String == config.activationId,
+              evidence["expiresAt"] as? String == ISO8601DateFormatter().string(from: config.expiresAt),
+              evidence["transportConfigured"] as? Bool == true,
+              evidence["consentVerified"] as? Bool == true,
+              config.expiresAt > Date(), profile.connection.status == .connected else { return unavailable }
+        return ["deviceId": config.deviceId, "permissionId": config.permissionId,
+                "activationId": config.activationId, "expiresAt": ISO8601DateFormatter().string(from: config.expiresAt),
+                "connected": true, "consentVerified": true, "collecting": false]
+    }
+}
+
+// Provider failure or timeout must complete exactly once, without hanging the UI.
+private final class TunnelStatusReply: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Data?, Never>?
+    init(_ continuation: CheckedContinuation<Data?, Never>) { self.continuation = continuation }
+    func finish(_ data: Data?) {
+        lock.lock()
+        let pending = continuation
+        continuation = nil
+        lock.unlock()
+        pending?.resume(returning: data)
     }
 }

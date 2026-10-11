@@ -7,6 +7,9 @@ import { extname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { Pool } from 'pg';
 import { PostgresIosDeviceProvisioner } from './ios-device-provisioning.js';
+import { IosGatewayEnrollment, PostgresGatewayLeaseStore } from './ios-gateway-enrollment.js';
+import { resolveIosGatewayRuntime } from './ios-runtime-config.js';
+import { createIdentityTokenNotifier } from './identity-token-delivery.js';
 import { endpointBySignatureId } from './endpoint-intelligence.js';
 import { InverseGrowthEngine } from './inverse-growth.js';
 import { InversePricingEngine } from './inverse-pricing.js';
@@ -168,8 +171,10 @@ export function buildServer(options: {
   consumerDeviceBindingStore?: ConsumerDeviceBindingStore;
   iosGateway?: import('./kicks-consumer-routes.js').KicksConsumerRouteDependencies['iosGateway'];
   iosDeviceProvisioner?: import('./ios-device-provisioning.js').IosDeviceProvisioner;
+  identityTokenNotifier?: import('./datastorm-identity-routes.js').IdentityTokenNotifier;
 } = {}) {
   const databaseUrl = process.env.DATABASE_URL ?? process.env.KICKS_DATABASE_URL;
+  const identityTokenNotifier = options.identityTokenNotifier ?? createIdentityTokenNotifier(process.env);
   const environment = resolveRuntimeEnvironment({
     nodeEnvironment: process.env.NODE_ENV,
     kicksEnvironment: options.environment ?? process.env.KICKS_ENVIRONMENT,
@@ -206,6 +211,13 @@ export function buildServer(options: {
   const iosProvisioningPool = environment === 'staging' && databaseUrl && !options.iosDeviceProvisioner &&
     process.env.KICKS_IOS_PROVISIONING_ENABLED === 'true' ? new Pool({ connectionString: databaseUrl }) : null;
   const iosDeviceProvisioner = options.iosDeviceProvisioner ?? (iosProvisioningPool ? new PostgresIosDeviceProvisioner(iosProvisioningPool) : undefined);
+  const gatewayRuntime = options.iosGateway ? null : resolveIosGatewayRuntime(process.env, environment);
+  const gatewayPool = gatewayRuntime ? new Pool({ connectionString: databaseUrl }) : null;
+  const iosGateway = options.iosGateway ?? (gatewayRuntime && gatewayPool ? {
+    enrollment: new IosGatewayEnrollment({ identity: identityStore, bindings: deviceBindingStore, store,
+      leases: new PostgresGatewayLeaseStore(gatewayPool) }, gatewayRuntime.config),
+    authenticateAuthority: async (authorization?: string) => safeEqual(authorization ?? '', 'Bearer ' + gatewayRuntime.secret),
+  } : undefined);
   const app = Fastify({
     logger: { redact: [
       'req.headers.authorization',
@@ -226,16 +238,27 @@ export function buildServer(options: {
     return payload;
   });
   app.addHook('onClose', async () => {
-    await Promise.all([store.close(), identityStore.close(), deviceBindingStore.close(), iosProvisioningPool?.end()]);
+    await Promise.all([store.close(), identityStore.close(), deviceBindingStore.close(), iosProvisioningPool?.end(), gatewayPool?.end()]);
   });
 
   app.get('/health', async () => ({
     status: 'ok', service: 'kicks-api', environment, collector: 'metadata-only',
     durability: store instanceof PostgresStore ? 'postgres' : 'memory',
     enginePolicyVersion: '1.0.0', configuredEngineMode: requestedEngineMode,
+    onboarding: { emailDeliveryConfigured: Boolean(identityTokenNotifier), iosProvisioningConfigured: Boolean(iosDeviceProvisioner),
+      iosGatewayConfigured: Boolean(iosGateway), collectionVerified: false },
   }));
 
-  registerDataStormIdentityRoutes(app, identityStore);
+  registerDataStormIdentityRoutes(app, identityStore, identityTokenNotifier);
+  app.get('/core/consumer/v1/monitoring-policy', async (request, reply) => {
+    const token = request.headers.authorization?.match(/^Bearer (\S+)$/)?.[1];
+    const session = token ? await identityStore.findSessionByAccessToken(token) : null;
+    const account = session ? await identityStore.findAccountBySubjectId(session.subject_id) : null;
+    if (!account || ['suspended', 'closed'].includes(account.account_status)) return reply.code(401).send({ error: 'unauthorized' });
+    if (!gatewayRuntime) return reply.code(503).send({ error: 'monitoring_policy_not_configured' });
+    return { policy: { permissionId: gatewayRuntime.permissionId, purpose: gatewayRuntime.config.purpose,
+      policyVersion: gatewayRuntime.config.policyVersion, purposeVersion: gatewayRuntime.config.purposeVersion }, collectionEnabled: false };
+  });
   registerKicksConsumerRoutes(app, {
     identityStore,
     deviceBindingStore,
@@ -243,7 +266,7 @@ export function buildServer(options: {
     permissionsEngine,
     walletEngine,
     complianceEngine,
-    iosGateway: environment === 'staging' ? options.iosGateway : undefined,
+    iosGateway: environment === 'staging' ? iosGateway : undefined,
     iosDeviceProvisioner: environment === 'staging' ? iosDeviceProvisioner : undefined,
   });
 

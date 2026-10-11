@@ -102,3 +102,24 @@ for (const denied of [
     assert.equal(resourceReads, 0);
   });
 }
+
+test('malformed account responses produce a recoverable profile error', async () => {
+  const manager = {user:{subjectId:'ds-sub',email:'owner@example.test'}, request:async () => response(null)};
+  await assert.rejects(() => loadConsumerProfile(manager), /invalid response/);
+});
+
+test('malformed device entries cannot crash the profile renderer', async () => {
+  const manager = {
+    user: {subjectId:'ds-sub',email:'owner@example.test'},
+    async request(path) {
+      if (path.endsWith('/account')) return response({subject_id:'ds-sub',account_status:'active'});
+      if (path.endsWith('/products/kicks')) return response({profile:{subject_id:'ds-sub',status:'active'},entitlement:{subject_id:'ds-sub',status:'active'}});
+      if (path.endsWith('/devices')) return response({devices:[null,42,{device_id:'synthetic-device',display_name:{unexpected:true}}]});
+      return response({});
+    },
+  };
+  const profile = await loadConsumerProfile(manager);
+  assert.equal(profile.devices.length,1);
+  assert.equal(profile.devices[0].device_id,'synthetic-device');
+  assert.ok(profile.unavailable.includes('connected devices'));
+});

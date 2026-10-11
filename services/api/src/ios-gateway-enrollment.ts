@@ -69,6 +69,7 @@ export class PostgresGatewayLeaseStore implements GatewayLeaseStore {
 export type IosGatewayConfiguration = {
   environment: 'staging'; serverHost: string; serverPort: number; serverPublicKey: string;
   purpose: string; purposeVersion: string; policyVersion: string;
+  permissionId?: string;
 };
 const validKey = (key: string) => /^[A-Za-z0-9+/]{43}=$/.test(key) && Buffer.from(key, 'base64').toString('base64') === key && !Buffer.from(key, 'base64').every(b => b === 0);
 export class IosGatewayEnrollment {
@@ -79,6 +80,7 @@ export class IosGatewayEnrollment {
       !config.purpose || !config.purposeVersion || !config.policyVersion) throw new Error('invalid_staging_gateway_configuration');
   }
   private async authorized(lease: Pick<GatewayLease,'accountSubjectId'|'deviceId'|'tokenHash'|'permissionId'>) {
+    if (this.config.permissionId && lease.permissionId !== this.config.permissionId) return null;
     const { identity, bindings, store } = this.dependencies;
     const account = await identity.findAccountBySubjectId(lease.accountSubjectId);
     if (!account || ['closed','suspended'].includes(account.account_status)) return null;

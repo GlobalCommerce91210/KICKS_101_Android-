@@ -10,11 +10,16 @@ module.exports = ({ config }) => {
   }
   return {
     ...nativeConfig,
+    ios: { ...nativeConfig.ios, appleTeamId: 'CV47H4YVDC' },
     slug: 'ezekiel-ios',
     owner: 'datastorm-inc',
     extra: {
       ...config.extra,
-      eas: { projectId: '1d2a0901-41c9-4026-b835-139e785db502' },
+      eas: { projectId: '1d2a0901-41c9-4026-b835-139e785db502', build: { experimental: { ios: { appExtensions: process.env.KICKS_IOS_NATIVE_TUNNEL === '1' ? [{
+        targetName: 'KicksPacketTunnel', bundleIdentifier: 'com.datastorm.kicks.PacketTunnel',
+        entitlements: { 'com.apple.developer.networking.networkextension': ['packet-tunnel-provider'],
+          'keychain-access-groups': ['$(AppIdentifierPrefix)com.datastorm.kicks.collector'] },
+      }] : [] } } } },
     },
   };
 };
