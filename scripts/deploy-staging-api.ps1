@@ -90,14 +90,14 @@ if ($runtime.Kind -eq 'service') {
     Write-Host "Possible staging services:"
     $runtime.CandidateServices | Select-Object Name,DisplayName,State,PathName | Format-Table -AutoSize
   }
-  throw "No staging runtime was found on port 3000 and no unique KICKS/DataStorm service could be resolved."
+  Write-Warning "No staging runtime is currently listening on port 3000. A clean staging process will be started from this checkout after validation."
 }
 Write-Host "Repository root: $RepoRoot"
 
 $nssmKey = $null
 $previousNssmDirectory = $null
 $serviceDirectoryChanged = $false
-if ($service.PathName -match 'nssm') {
+if ($runtime.Kind -eq 'service' -and $service.PathName -match 'nssm') {
   $nssmKey = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName\Parameters"
   if (Test-Path $nssmKey) {
     $nssm = Get-ItemProperty $nssmKey
@@ -129,10 +129,56 @@ npm ci
 npm run typecheck --workspace @kicks/api
 npm run test --workspace @kicks/api
 
+$startedProcess = $null
+$logRoot = Join-Path $RepoRoot ".staging"
+New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
+
+function Import-StagingEnvironment {
+  $names = @(
+    'DATABASE_URL','KICKS_DATABASE_URL','KICKS_ENVIRONMENT','KICKS_PUBLIC_API_URL',
+    'KICKS_STAGING_ADMIN_SECRET','KICKS_IOS_PROVISIONING_ENABLED','KICKS_ENGINE_MODE',
+    'KICKS_ENGINE_MANUAL_OVERRIDE','KICKS_COMPENSATION_EXECUTION_ENABLED','PORT','HOST'
+  )
+  foreach ($name in $names) {
+    if (-not (Get-Item "Env:$name" -ErrorAction SilentlyContinue)) {
+      $value = [Environment]::GetEnvironmentVariable($name, 'User')
+      if (-not $value) { $value = [Environment]::GetEnvironmentVariable($name, 'Machine') }
+      if ($value) { Set-Item -Path "Env:$name" -Value $value }
+    }
+  }
+  if (-not $env:DATABASE_URL -and -not $env:KICKS_DATABASE_URL) {
+    throw "No DATABASE_URL or KICKS_DATABASE_URL is available to the elevated staging process. Refusing to start with in-memory durability."
+  }
+  $env:KICKS_ENVIRONMENT = 'staging'
+  $env:NODE_ENV = 'development'
+  if (-not $env:KICKS_PUBLIC_API_URL) { $env:KICKS_PUBLIC_API_URL = $PublicOrigin }
+  if (-not $env:PORT) { $env:PORT = '3000' }
+  if (-not $env:HOST) { $env:HOST = '0.0.0.0' }
+}
+
 try {
-  Restart-Service -Name $ServiceName -Force
-  $svc = Get-Service -Name $ServiceName
-  if ($svc.Status -ne "Running") { throw "$ServiceName is not running." }
+  if ($runtime.Kind -eq 'service') {
+    Restart-Service -Name $ServiceName -Force
+    $svc = Get-Service -Name $ServiceName
+    if ($svc.Status -ne "Running") { throw "$ServiceName is not running." }
+  } elseif ($runtime.Kind -eq 'unknown') {
+    Import-StagingEnvironment
+    $stdout = Join-Path $logRoot "api.stdout.log"
+    $stderr = Join-Path $logRoot "api.stderr.log"
+    Remove-Item $stdout,$stderr -Force -ErrorAction SilentlyContinue
+    $startedProcess = Start-Process -FilePath "npm.cmd" -ArgumentList @("run","start","--workspace","@kicks/api") -WorkingDirectory $RepoRoot -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -WindowStyle Hidden
+    Set-Content -LiteralPath (Join-Path $logRoot "api.pid") -Value $startedProcess.Id
+    Write-Host "Started staging API process PID $($startedProcess.Id). Logs: $stdout ; $stderr"
+    $deadline = (Get-Date).AddSeconds(20)
+    do {
+      Start-Sleep -Milliseconds 500
+      $listener = Get-NetTCPConnection -State Listen -LocalPort 3000 -ErrorAction SilentlyContinue | Select-Object -First 1
+    } until ($listener -or (Get-Date) -ge $deadline -or $startedProcess.HasExited)
+    if (-not $listener) {
+      $err = if (Test-Path $stderr) { Get-Content -Raw $stderr } else { "" }
+      throw "Staging API did not begin listening on port 3000. $err"
+    }
+  }
 
   Assert-HttpStatus "$LocalOrigin/health" 200
   Assert-HttpStatus "$LocalOrigin/core/identity/v1/account" 401
@@ -159,12 +205,17 @@ try {
   Write-Host "Staging API deployment and public onboarding boundary verified at $candidate"
 } catch {
   Write-Warning "Deployment verification failed. Rolling back to $previous"
+  if ($startedProcess -and -not $startedProcess.HasExited) {
+    Stop-Process -Id $startedProcess.Id -Force -ErrorAction SilentlyContinue
+  }
   git checkout --detach $previous
   npm ci
   if ($serviceDirectoryChanged -and $nssmKey -and $previousNssmDirectory) {
     Write-Warning "Restoring previous NSSM AppDirectory: $previousNssmDirectory"
     Set-ItemProperty -LiteralPath $nssmKey -Name AppDirectory -Value $previousNssmDirectory
   }
-  Restart-Service -Name $ServiceName -Force
+  if ($runtime.Kind -eq 'service') {
+    Restart-Service -Name $ServiceName -Force
+  }
   throw
 }
