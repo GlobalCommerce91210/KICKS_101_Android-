@@ -1,6 +1,11 @@
 export interface AccountUser { subjectId: string; email: string; }
 export interface SessionStorage { read(): Promise<string | null>; write(value: string): Promise<void>; clear(): Promise<void>; }
 export class SessionError extends Error {}
+const createIdempotencyKey = () => {
+  const uuid = (globalThis as any).crypto?.randomUUID?.();
+  return uuid ? `acct-${uuid}`
+    : `acct-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+};
 export class SessionManager {
   user: AccountUser | null = null;
   warning: string | null = null;
@@ -65,6 +70,47 @@ export class SessionManager {
     this.user = user; this.accessToken = data.access_token; this.refreshToken = data.refresh_token;
     this.expiresAt = Date.now() + data.expires_in * 1000;
     this.emit();
+  }
+  async register(email: string, password: string, options: {
+    termsVersion: string;
+    privacyVersion: string;
+    marketingOptIn?: boolean;
+    region?: string | null;
+    locale?: string;
+    timezone?: string;
+  }) {
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail || password.length < 12) {
+      throw new SessionError('Enter a valid email and a password with at least 12 characters.');
+    }
+    if (!options.termsVersion.trim() || !options.privacyVersion.trim()) {
+      throw new SessionError('Account registration is not configured for this build.');
+    }
+    const response = await this.send('/core/identity/v1/account', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'idempotency-key': createIdempotencyKey(),
+      },
+      body: JSON.stringify({
+        email: normalizedEmail,
+        password,
+        region: options.region ?? null,
+        marketing_opt_in: options.marketingOptIn ?? false,
+        terms_version: options.termsVersion,
+        privacy_version: options.privacyVersion,
+        metadata: {
+          ...(options.locale ? { locale: options.locale } : {}),
+          ...(options.timezone ? { timezone: options.timezone } : {}),
+        },
+      }),
+    });
+    if (!response.ok) {
+      if (response.status === 409) throw new SessionError('A DataStorm account already exists for this email. Sign in instead.');
+      if (response.status === 422 || response.status === 400) throw new SessionError('The account information could not be accepted. Review it and try again.');
+      throw new SessionError('Account registration is unavailable. Try again later.');
+    }
+    await this.login(normalizedEmail, password);
   }
   async login(email: string, password: string) {
     const epoch = ++this.epoch;

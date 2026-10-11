@@ -616,6 +616,45 @@ export function registerKicksConsumerRoutes(
     });
   });
 
+  app.get('/core/consumer/v1/permissions/effective', async (request, reply) => {
+    const consumer = await authenticateConsumer(request.headers.authorization);
+    if (!consumer) return reply.code(401).send({
+      error: 'unauthorized',
+      message: 'A valid DataStorm account with KICK’S access is required.',
+      request_id: request.id,
+    });
+    return reply.code(200).send(
+      permissionsEngine.getEffectivePermissions(consumer.subjectId),
+    );
+  });
+
+  app.get('/core/consumer/v1/permissions/consent-log', async (request, reply) => {
+    const consumer = await authenticateConsumer(request.headers.authorization);
+    if (!consumer) return reply.code(401).send({
+      error: 'unauthorized',
+      message: 'A valid DataStorm account with KICK’S access is required.',
+      request_id: request.id,
+    });
+    const parsed = z.object({
+      page: z.coerce.number().int().min(1).default(1),
+      page_size: z.coerce.number().int().min(1).max(100).default(25),
+    }).strict().safeParse(request.query);
+    if (!parsed.success) return reply.code(422).send({ error: 'validation_error', request_id: request.id });
+    return reply.code(200).send(
+      permissionsEngine.getConsentLog(consumer.subjectId, parsed.data.page, parsed.data.page_size),
+    );
+  });
+
+  app.get('/core/consumer/v1/wallet', async (request, reply) => {
+    const consumer = await authenticateConsumer(request.headers.authorization);
+    if (!consumer) return reply.code(401).send({
+      error: 'unauthorized',
+      message: 'A valid DataStorm account with KICK’S access is required.',
+      request_id: request.id,
+    });
+    return reply.code(200).send(walletEngine.getSummary(consumer.subjectId));
+  });
+
   app.get('/core/consumer/v1/snapshot', async (request, reply) => {
     const consumer = await authenticateConsumer(
       request.headers.authorization,

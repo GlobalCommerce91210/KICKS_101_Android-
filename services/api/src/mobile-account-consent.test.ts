@@ -41,6 +41,9 @@ test('mobile session uses actual DataStorm routes and governs collector consent 
   await session.login('wire-contract@example.test', 'Synthetic-Password-2026');
   assert.equal(session.user?.subjectId, account.json().account.subject_id);
   assert.ok(saved && !String(saved).includes('Synthetic-Password-2026'));
+  assert.equal((await session.request('/core/consumer/v1/permissions/effective')).status, 200);
+  assert.equal((await session.request('/core/consumer/v1/permissions/consent-log?page=1&page_size=25')).status, 200);
+  assert.equal((await session.request('/core/consumer/v1/wallet')).status, 200);
   const collectorSubject = randomUUID();
   const device = await app.inject({ method: 'POST', url: '/v1/staging/devices', headers: { 'x-admin-secret': 'synthetic-admin' }, payload: { subjectId: collectorSubject } });
   assert.equal(device.statusCode, 201);

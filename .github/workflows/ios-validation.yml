@@ -51,6 +51,24 @@ jobs:
         working-directory: apps/mobile
         run: npx expo config --type public
 
+      - name: Validate internal iOS device build contract
+        working-directory: apps/mobile
+        run: |
+          node - <<'NODE'
+          const eas = require('./eas.json');
+          const env = eas?.build?.['ios-device']?.env ?? {};
+          if (env.KICKS_IOS_NATIVE_TUNNEL !== '1') throw new Error('ios-device must enable KICKS_IOS_NATIVE_TUNNEL=1');
+          if (env.EXPO_PUBLIC_IOS_API_URL !== 'https://staging-api.datastorminc.live') {
+            throw new Error('ios-device must target the approved staging API origin');
+          }
+          if (env.EXPO_PUBLIC_TERMS_VERSION !== 'KC-CON-01-v1.0') {
+            throw new Error('ios-device must carry the approved KC-CON-01-v1.0 terms version');
+          }
+          if (env.EXPO_PUBLIC_PRIVACY_VERSION !== 'KC-CON-02-v1.0') {
+            throw new Error('ios-device must carry the approved KC-CON-02-v1.0 privacy version');
+          }
+          NODE
+
       - name: Generate iOS native project
         working-directory: apps/mobile
         run: npx expo prebuild --platform ios --clean --no-install
