@@ -11,7 +11,7 @@ function countOf(value: unknown): number | null {
   return null;
 }
 function numberText(value: unknown): string {
-  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '-';
+  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '—';
 }
 function statusText(value: unknown): string {
   return typeof value === 'string' && value.trim() ? value.replaceAll('_', ' ') : 'Unavailable';
@@ -56,7 +56,7 @@ function ConsumerProfile() {
 
   if (ready && !user) return null;
   if (!ready || (loading && !profile)) {
-    return <Screen><BrandHeader section="Consumer profile" /><Card><ActivityIndicator color={colors.orange} /><Text style={ui.body}>Loading your DataStorm account.</Text></Card></Screen>;
+    return <Screen><BrandHeader section="Consumer profile" /><Card><ActivityIndicator color={colors.orange} /><Text style={ui.body}>Loading your DataStorm account…</Text></Card></Screen>;
   }
   if (!user) return null;
 
@@ -68,7 +68,7 @@ function ConsumerProfile() {
   return <Screen>
     <BrandHeader section="DataStorm consumer profile" />
     <Text style={ui.title}>Your account. Your choices.</Text>
-    <Text style={ui.body}>KICK'S uses your verified DataStorm consumer identity. Devices and collector identities remain separate and can be revoked independently.</Text>
+    <Text style={ui.body}>KICK’S uses your verified DataStorm consumer identity. Devices and collector identities remain separate and can be revoked independently.</Text>
 
     {error && <Card><Text accessibilityRole="alert" style={s.error}>{error}</Text><Pressable onPress={refresh}><Text style={s.link}>Try again</Text></Pressable></Card>}
 
@@ -77,36 +77,36 @@ function ConsumerProfile() {
       <Text style={ui.h2}>{profile?.account.displayName ?? profile?.account.email ?? user.email}</Text>
       <Text style={ui.body}>{profile?.account.email ?? user.email}</Text>
       <Row label="Account status" value={statusText(profile?.account.status)} />
-      <Row label="KICK'S profile" value={statusText(profile?.product.status)} />
+      <Row label="KICK’S profile" value={statusText(profile?.product.status)} />
       <Text style={s.subject}>DataStorm subject: {user.subjectId}</Text>
     </Card>
 
     <Card>
       <Text style={ui.eyebrow}>MONITORING</Text>
       <Row label="Status" value={statusText(monitoring?.status)} />
-      <Row label="Apps observed" value={monitoring?.apps_observed ?? '-'} />
-      <Row label="Destinations / 24h" value={monitoring?.destinations_observed_24h ?? '-'} />
-      <Row label="Items needing review" value={monitoring?.items_needing_review ?? '-'} />
+      <Row label="Apps observed" value={monitoring?.apps_observed ?? '—'} />
+      <Row label="Destinations / 24h" value={monitoring?.destinations_observed_24h ?? '—'} />
+      <Row label="Items needing review" value={monitoring?.items_needing_review ?? '—'} />
     </Card>
 
     <Card>
       <Text style={ui.eyebrow}>DEVICES</Text>
-      <Pressable accessibilityRole="button" style={{ minHeight: 44, justifyContent: 'center' }} onPress={() => router.push('/my-devices')}><Text style={s.link}>My Devices  Set Up Collection</Text></Pressable>
-      <Row label="Connected devices" value={profile && !profile.unavailable.includes('connected devices') ? profile.devices.length : '-'} />
+      <Pressable accessibilityRole="button" style={{ minHeight: 44, justifyContent: 'center' }} onPress={() => router.push('/my-devices')}><Text style={s.link}>My Devices → Set Up Collection</Text></Pressable>
+      <Row label="Connected devices" value={profile && !profile.unavailable.includes('connected devices') ? profile.devices.length : '—'} />
       <Text style={ui.body}>Device and collector IDs are operational identities. They do not replace your DataStorm consumer account.</Text>
       {profile?.devices.slice(0, 4).map((device: any, index) =>
         <View key={String(device.device_id ?? device.id ?? index)} style={s.device}>
           <Text style={s.deviceTitle}>{device.name ?? device.device_name ?? `Device ${index + 1}`}</Text>
-          <Text style={ui.body}>Collector: {statusText(device.collector_status)} � Monitoring: {statusText(device.monitoring_status)}</Text>
+          <Text style={ui.body}>Collector: {statusText(device.collector_status)} · Monitoring: {statusText(device.monitoring_status)}</Text>
         </View>
       )}
     </Card>
 
     <Card>
       <Text style={ui.eyebrow}>PERMISSIONS & CONSENT</Text>
-      <Row label="Permission records" value={activePermissions ?? '-'} />
-      <Row label="Revoked" value={revoked ?? '-'} />
-      <Row label="Recent consent events" value={profile && !profile.unavailable.includes('consent history') ? profile.consentLog.length : '-'} />
+      <Row label="Permission records" value={activePermissions ?? '—'} />
+      <Row label="Revoked" value={revoked ?? '—'} />
+      <Row label="Recent consent events" value={profile && !profile.unavailable.includes('consent history') ? profile.consentLog.length : '—'} />
       <Pressable onPress={() => router.push('/permissions')}><Text style={s.link}>Review permissions</Text></Pressable>
     </Card>
 
@@ -123,7 +123,7 @@ function ConsumerProfile() {
       <Text style={ui.body}>Some profile sources are not available from the current staging API: {profile.unavailable.join(', ')}. No placeholder data is being presented as live.</Text>
     </Card>}
 
-    <Pressable disabled={loading} onPress={refresh}><Text style={s.link}>{loading ? 'Refreshing.' : 'Refresh profile'}</Text></Pressable>
+    <Pressable disabled={loading} onPress={refresh}><Text style={s.link}>{loading ? 'Refreshing…' : 'Refresh profile'}</Text></Pressable>
     <Pressable onPress={() => router.push('/settings')}><Text style={s.secondary}>Account & privacy settings</Text></Pressable>
   </Screen>;
 }
@@ -141,3 +141,4 @@ const s = StyleSheet.create({
   device: { borderTopWidth: 1, borderTopColor: '#282329', paddingTop: 10, marginTop: 4 },
   deviceTitle: { color: colors.text, fontWeight: '800' }
 });
+
