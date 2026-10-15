@@ -100,15 +100,66 @@ module.exports = function withKicksPacketTunnel(config) {
     const buildId = addObject('PBXBuildFile', { isa: 'PBXBuildFile', productRef: productId,
       productRef_comment: 'WireGuardKit' }, 'WireGuardKit in Frameworks');
     frameworks.buildPhase.files.push({ value: buildId, comment: 'WireGuardKit in Frameworks' });
-    // Upstream WireGuardKit requires the Go archive before the extension links.
-    // Go 1.19 is required by the pinned upstream runtime patch; CI must install it.
-    project.addBuildPhase([], 'PBXShellScriptBuildPhase', 'Build WireGuard Go bridge', extension.uuid, {
-      shellPath: '/bin/sh', shellScript: 'set -eu\n' +
+    // A separate prerequisite target is required: a shell phase after Sources/
+    // Frameworks does not guarantee that Xcode waits before the extension link.
+    // Declare both a target edge and the actual archive output dependency.
+    const bridgeName = 'KicksWireGuardBridge';
+    const bridgeScript = 'set -eu\n' +
         'test "$PLATFORM_NAME" = iphoneos || { echo "KICKS tunnel validation requires iphoneos; simulator unsupported" >&2; exit 1; }\n' +
         'go version | grep -Eq "go1\\.19([. ]|$)" || { echo "Pinned WireGuard bridge requires Go 1.19" >&2; exit 1; }\n' +
         'WG_SOURCE="$SRCROOT/vendor/wireguard-apple/Sources/WireGuardKitGo"\n' +
-        'test -f "$WG_SOURCE/Makefile"\nmake -C "$WG_SOURCE"\n',
+        'test -f "$WG_SOURCE/Makefile"\n' +
+        'make -C "$WG_SOURCE" ARCHS="$ARCHS" PLATFORM_NAME="$PLATFORM_NAME" SDKROOT="$SDKROOT" ' +
+        'DESTDIR="$BUILT_PRODUCTS_DIR" BUILDDIR="$PROJECT_TEMP_DIR/wireguard-go-bridge-$CONFIGURATION-$PLATFORM_NAME"\n' +
+        'test -s "$BUILT_PRODUCTS_DIR/libwg-go.a"\n' +
+        'xcrun lipo -info "$BUILT_PRODUCTS_DIR/libwg-go.a"\n';
+    const bridgePhase = addObject('PBXShellScriptBuildPhase', {
+      isa: 'PBXShellScriptBuildPhase', buildActionMask: 2147483647,
+      files: [], inputPaths: ['"$(SRCROOT)/vendor/wireguard-apple/Sources/WireGuardKitGo/Makefile"',
+        '"$(SRCROOT)/vendor/wireguard-apple/Sources/WireGuardKitGo/go.mod"',
+        '"$(SRCROOT)/vendor/wireguard-apple/Sources/WireGuardKitGo/go.sum"',
+        '"$(SRCROOT)/vendor/wireguard-apple/Sources/WireGuardKitGo/api-apple.go"'],
+      outputPaths: ['"$(BUILT_PRODUCTS_DIR)/libwg-go.a"'],
+      name: '"Build WireGuard Go bridge"', runOnlyForDeploymentPostprocessing: 0,
+      shellPath: '/bin/sh', shellScript: JSON.stringify(bridgeScript),
+    }, 'Build WireGuard Go bridge');
+    const bridgeConfigs = list.buildConfigurations.map(item => {
+      const original = objects.XCBuildConfiguration[item.value];
+      const id = addObject('XCBuildConfiguration', {
+        isa: 'XCBuildConfiguration', name: original.name,
+        buildSettings: { SDKROOT: 'iphoneos', IPHONEOS_DEPLOYMENT_TARGET: '16.0', ARCHS: '"$(ARCHS_STANDARD)"',
+          SUPPORTED_PLATFORMS: 'iphoneos', ENABLE_USER_SCRIPT_SANDBOXING: 'NO' },
+      }, original.name);
+      return { value: id, comment: original.name };
     });
+    const bridgeList = addObject('XCConfigurationList', {
+      isa: 'XCConfigurationList', buildConfigurations: bridgeConfigs,
+      defaultConfigurationIsVisible: 0, defaultConfigurationName: list.defaultConfigurationName ?? 'Release',
+    }, 'Build configuration list for KicksWireGuardBridge');
+    const bridgeTarget = addObject('PBXAggregateTarget', {
+      isa: 'PBXAggregateTarget', name: bridgeName, productName: bridgeName,
+      buildConfigurationList: bridgeList, buildPhases: [{ value: bridgePhase, comment: 'Build WireGuard Go bridge' }],
+      dependencies: [],
+    }, bridgeName);
+    root.targets.push({ value: bridgeTarget, comment: bridgeName });
+    const proxy = addObject('PBXContainerItemProxy', {
+      isa: 'PBXContainerItemProxy', containerPortal: project.getFirstProject().uuid,
+      containerPortal_comment: 'Project object', proxyType: 1,
+      remoteGlobalIDString: bridgeTarget, remoteInfo: bridgeName,
+    }, 'PBXContainerItemProxy');
+    const dependency = addObject('PBXTargetDependency', {
+      isa: 'PBXTargetDependency', target: bridgeTarget, target_comment: bridgeName,
+      targetProxy: proxy, targetProxy_comment: 'PBXContainerItemProxy',
+    }, 'PBXTargetDependency');
+    extension.pbxNativeTarget.dependencies.push({ value: dependency, comment: 'PBXTargetDependency' });
+    const archiveRef = addObject('PBXFileReference', {
+      isa: 'PBXFileReference', explicitFileType: 'archive.ar',
+      path: '"libwg-go.a"', sourceTree: 'BUILT_PRODUCTS_DIR',
+    }, 'libwg-go.a');
+    const archiveBuild = addObject('PBXBuildFile', {
+      isa: 'PBXBuildFile', fileRef: archiveRef, fileRef_comment: 'libwg-go.a',
+    }, 'libwg-go.a in Frameworks');
+    frameworks.buildPhase.files.push({ value: archiveBuild, comment: 'libwg-go.a in Frameworks' });
     return mod;
   });
 };

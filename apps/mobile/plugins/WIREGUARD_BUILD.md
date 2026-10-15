@@ -32,5 +32,14 @@ device workflow retains it with build evidence. The native Go archive still
 uses upstream code and its runtime patch, pinned Go 1.19.13, and iphoneos device
 compilation. Simulator validation is deliberately rejected for this transport.
 
+The Go bridge is built in the separate `KicksWireGuardBridge` aggregate target.
+The tunnel has an explicit target dependency on it and links its declared
+`$(BUILT_PRODUCTS_DIR)/libwg-go.a` file. The build passes destination, temporary
+directory, SDK, platform, and architecture explicitly to the upstream Makefile.
+This replaces an extension shell phase that Xcode scheduled after linking and
+therefore never ran before the missing-library failure. The device workflow
+checks the archive's arm64 slice and exported wgTurnOn symbol and retains its
+hash and symbol list with the compilation evidence.
+
 Local generated-project readback checks do not replace a successful macOS
 device compilation, signing, or encrypted-routing evidence on an iPad.

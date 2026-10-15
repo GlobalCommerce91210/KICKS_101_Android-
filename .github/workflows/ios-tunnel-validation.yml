@@ -59,6 +59,12 @@ jobs:
           app="$(find ios-tunnel-derived/Build/Products/Debug-iphoneos -maxdepth 1 -name '*.app' | head -n 1)"
           test -n "$app"
           test -d "$app/PlugIns/KicksPacketTunnel.appex"
+          bridge="ios-tunnel-derived/Build/Products/Debug-iphoneos/libwg-go.a"
+          test -s "$bridge"
+          xcrun lipo -verify_arch arm64 "$bridge"
+          xcrun nm -gU "$bridge" > ../../ios-tunnel-evidence/GO_BRIDGE_SYMBOLS.txt
+          grep -Eq '[[:space:]]_wgTurnOn$' ../../ios-tunnel-evidence/GO_BRIDGE_SYMBOLS.txt
+          shasum -a 256 "$bridge" > ../../ios-tunnel-evidence/GO_BRIDGE_SHA256.txt
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
             "$app/PlugIns/KicksPacketTunnel.appex/Info.plist" | grep -Fx com.datastorm.kicks.PacketTunnel
           git rev-parse HEAD > ../../ios-tunnel-evidence/SOURCE_COMMIT.txt
