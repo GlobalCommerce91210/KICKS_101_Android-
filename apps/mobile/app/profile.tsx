@@ -91,6 +91,7 @@ function ConsumerProfile() {
 
     <Card>
       <Text style={ui.eyebrow}>DEVICES</Text>
+      <Pressable accessibilityRole="button" style={{ minHeight: 44, justifyContent: 'center' }} onPress={() => router.push('/my-devices')}><Text style={s.link}>My Devices → Set Up Collection</Text></Pressable>
       <Row label="Connected devices" value={profile && !profile.unavailable.includes('connected devices') ? profile.devices.length : '—'} />
       <Text style={ui.body}>Device and collector IDs are operational identities. They do not replace your DataStorm consumer account.</Text>
       {profile?.devices.slice(0, 4).map((device: any, index) =>
@@ -140,3 +141,4 @@ const s = StyleSheet.create({
   device: { borderTopWidth: 1, borderTopColor: '#282329', paddingTop: 10, marginTop: 4 },
   deviceTitle: { color: colors.text, fontWeight: '800' }
 });
+

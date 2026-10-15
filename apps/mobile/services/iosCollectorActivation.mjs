@@ -13,6 +13,8 @@ export async function activateIosCollector(deps) {
   if (!deps.native) throw new CollectorActivationError('This build does not include the iOS collector. Monitoring remains off.');
   let started = false;
   try {
+    const capability = await deps.native.getStatus(); current();
+    if (capability?.unavailableReason) throw new CollectorActivationError(capability.unavailableReason);
     if (deps.provision) { await deps.provision(); current(); }
     const deviceId = await deps.native.getDeviceId();
     current();
@@ -63,3 +65,4 @@ export async function activateIosCollector(deps) {
     throw error;
   }
 }
+

@@ -19,7 +19,7 @@ const states: Record<string, string> = {
   connected_waiting_for_evidence: 'VPN connected. Collection has not been verified.',
   collecting: 'Collection verified.', stop_unconfirmed: 'Stop could not be confirmed. Turn off KICK’S VPN in iOS Settings.',
 };
-export function IosCollectorControls() {
+export function IosCollectorControls({ disabled = false, onBusyChange }: { disabled?: boolean; onBusyChange?: (busy: boolean) => void }) {
   const { manager, user } = useSession();
   const [state, setState] = useState('off');
   const [error, setError] = useState<string | null>(null);
@@ -54,8 +54,8 @@ export function IosCollectorControls() {
     if (mounted.current) setState('off');
   };
   const start = async () => {
-    if (flight.current) return;
-    flight.current = true; setBusy(true); setError(null);
+    if (flight.current || disabled) return;
+    flight.current = true; setBusy(true); onBusyChange?.(true); setError(null);
     try {
       if (!configured) throw new Error('The reviewed collection purpose is not configured for this build. Monitoring remains off.');
       const result = await activateIosCollector({
@@ -87,7 +87,7 @@ export function IosCollectorControls() {
         const message = failure instanceof Error ? failure.message : 'Collector activation failed.';
         setError(message); setState(message.includes('stop could not be confirmed') ? 'stop_unconfirmed' : 'off');
       }
-    } finally { flight.current = false; if (mounted.current) setBusy(false); }
+    } finally { flight.current = false; onBusyChange?.(false); if (mounted.current) setBusy(false); }
   };
   useEffect(() => {
     mounted.current = true;
@@ -95,6 +95,7 @@ export function IosCollectorControls() {
       setState('checking');
       void usableNative.getStatus().then(status => {
         if (!mounted.current) return;
+        if (status.unavailableReason) setError(status.unavailableReason);
         setState(status.connected === true || status.collecting === true ? 'connected_waiting_for_evidence' : 'off');
       }).catch(() => {
         if (mounted.current) { setState('stop_unconfirmed'); setError('Existing VPN status could not be confirmed. Check KICK’S VPN in iOS Settings.'); }
@@ -131,14 +132,16 @@ export function IosCollectorControls() {
     return () => { live = false; clearInterval(interval); };
   }, [user?.subjectId, state]);
   return <Card accent>
-    <Text style={ui.h2}>Network monitoring</Text>
+    <Text style={ui.h2}>Set Up Collection</Text>
+    {!usableNative && <Text accessibilityRole="alert" style={ui.body}>The native extension is unavailable. Install a verified staging build containing the signed Packet Tunnel extension, then retry. No fallback collection is enabled.</Text>}
     <Text accessibilityRole="alert" style={ui.body}>{states[state] ?? 'Checking collector status.'}</Text>
-    <Pressable accessibilityRole="button" disabled={busy || state === 'checking'} style={{minHeight:44,justifyContent:'center'}} onPress={() => {
+    <Pressable accessibilityRole="button" disabled={disabled || busy || state === 'checking' || !usableNative} style={{minHeight:44,justifyContent:'center'}} onPress={() => {
       if (['collecting', 'connected_waiting_for_evidence', 'stop_unconfirmed'].includes(state)) {
         void stop().catch(() => { setState('stop_unconfirmed'); setError('Turn off KICK’S VPN in iOS Settings.'); });
       } else void start();
-    }}><Text style={ui.label}>{busy ? 'CHECKING…' : state === 'off' ? 'START MONITORING' : 'STOP MONITORING'}</Text></Pressable>
+    }}><Text style={ui.label}>{busy ? 'CHECKING…' : state === 'off' ? 'SET UP COLLECTION' : 'STOP MONITORING'}</Text></Pressable>
     {error && <Text accessibilityRole="alert" style={ui.body}>{error}</Text>}
     <Text style={ui.body}>Stopping the VPN and revoking saved consent are separate controls. Review or withdraw your permission on the Permissions screen.</Text>
   </Card>;
 }
+

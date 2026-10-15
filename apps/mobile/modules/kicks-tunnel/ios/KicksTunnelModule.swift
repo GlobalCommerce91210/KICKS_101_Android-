@@ -397,6 +397,8 @@ private final class KicksTunnelController {
         // The extension evidence protocol must be implemented before enabling this.
         return ["deviceId": (try? configuration().deviceId) ?? "",
                 "permissionId": (try? configuration().permissionId) ?? "",
-                "connected": connected, "consentVerified": false, "collecting": false]
+                "connected": connected, "consentVerified": false, "collecting": false,
+                "unavailableReason": "Native collection verification is unavailable in this build. Request a verified staging extension from support. Collection remains off."]
     }
 }
+
