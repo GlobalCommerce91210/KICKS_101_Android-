@@ -54,7 +54,7 @@ export default function MyDevices() {
       <Text style={ui.h2}>This device</Text>
       <Pressable accessibilityRole="button" disabled={busy || collectionBusy || !native?.provision} style={{minHeight:44,justifyContent:'center'}} onPress={() => Alert.alert('Enroll this device?', 'Link this device securely to your signed-in account. Collection remains off until you choose Set Up Collection and approve its purpose.', [
         { text: 'Cancel', style: 'cancel' }, { text: 'Enroll', onPress: () => { void run(() => enrollCurrentDevice(manager, native)); } },
-      ])}><Text style={ui.label}>{busy ? 'PLEASE WAIT.' : 'ENROLL THIS DEVICE'}</Text></Pressable>
+      ])}><Text style={ui.label}>{busy ? 'PLEASE WAIT…' : 'ENROLL THIS DEVICE'}</Text></Pressable>
       {!native?.provision && <Text accessibilityRole="alert" style={ui.body}>Secure current-device enrollment is unavailable in this build. Use a verified iOS staging build containing the Packet Tunnel extension. Android enrollment requires its existing native device proof; contact staging support. No fallback collector will start.</Text>}
     </Card>
     <Card>
@@ -62,9 +62,9 @@ export default function MyDevices() {
       {!profile ? <Text style={ui.body}>Refresh to load devices.</Text> : profile.unavailable.includes('connected devices') ? <Text accessibilityRole="alert" style={ui.body}>Device service unavailable. Check your connection and refresh.</Text> : profile.devices.length === 0 ? <Text style={ui.body}>No linked devices.</Text> : profile.devices.map(device => <Card key={device.device_id}>
         <Text style={ui.h2}>{device.display_name ?? device.platform ?? 'Device'}</Text>
         <Text style={ui.body}>Device: {device.device_id}</Text>
-        <Text style={ui.body}>Collector: {device.collector_status ?? 'unknown'} � Monitoring: {device.monitoring_status ?? 'unavailable'}</Text>
+        <Text style={ui.body}>Collector: {device.collector_status ?? 'unknown'} · Monitoring: {device.monitoring_status ?? 'unavailable'}</Text>
         <Text style={ui.body}>Last observation: {device.last_seen_at ?? 'None verified'}</Text>
-        <Pressable accessibilityRole="button" disabled={busy || collectionBusy} style={{minHeight:44,justifyContent:'center'}} onPress={() => Alert.alert('Revoke collection and unlink?', 'Withdraw this build's collection permission and unlink this device. Existing app data and credentials are preserved. Other sharing permissions can be reviewed in Permissions.', [
+        <Pressable accessibilityRole="button" disabled={busy || collectionBusy} style={{minHeight:44,justifyContent:'center'}} onPress={() => Alert.alert('Revoke collection and unlink?', 'Withdraw this build’s collection permission and unlink this device. Existing app data and credentials are preserved. Other sharing permissions can be reviewed in Permissions.', [
           { text: 'Cancel', style: 'cancel' }, { text: 'Revoke and unlink', style: 'destructive', onPress: () => { void run(() => revokeAndUnlinkDevice(manager, device.device_id, { permissionId: process.env.EXPO_PUBLIC_MONITORING_PERMISSION_ID ?? '' }, native, randomUUID())); } },
         ])}><Text style={ui.label}>REVOKE & UNLINK</Text></Pressable>
       </Card>)}
