@@ -9,7 +9,7 @@ export interface IosCollectorNative {
   requestAuthorization(): Promise<string>;
   start(): Promise<void>;
   stop(): Promise<void>;
-  getStatus(): Promise<{deviceId: string; permissionId: string; connected: boolean; consentVerified: boolean; collecting: boolean; lastAcceptedObservationAt?: string}>;
+  getStatus(): Promise<{deviceId: string; permissionId: string; connected: boolean; consentVerified: boolean; collecting: boolean; lastAcceptedObservationAt?: string; unavailableReason?: string}>;
 }
 export function activateIosCollector(deps: {
   subject(): string | null;
