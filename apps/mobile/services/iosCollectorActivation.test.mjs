@@ -13,6 +13,14 @@ function fixture() {
     async readConsent(){calls.push('read');return consent;},async grantConsent(){calls.push('grant');consent={...policy,action:'grant',deviceId:'this-ipad',subjectId:'account-1'};},onState:state=>calls.push(state)};
   return {calls,deps,set subject(value){subject=value;},set consent(value){consent=value;}};
 }
+
+test('unavailable runtime verification prevents provisioning, grants, leases and VPN approval', async () => {
+  const f = fixture(); f.deps.native.getStatus = async () => ({ unavailableReason: 'Native verification unavailable. Request a verified staging build.' });
+  f.deps.provision = async () => { f.calls.push('provision'); };
+  f.deps.renewLease = async () => { f.calls.push('lease'); };
+  await assert.rejects(activateIosCollector(f.deps), /verification unavailable/);
+  assert.deepEqual(f.calls, ['disclosure']);
+});
 test('disclosure precedes saved consent, OS authorization and verified collection',async()=>{
   const f=fixture();assert.equal((await activateIosCollector(f.deps)).state,'collecting');
   assert.ok(f.calls.indexOf('disclosure')<f.calls.indexOf('grant'));
