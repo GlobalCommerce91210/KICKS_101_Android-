@@ -60,8 +60,9 @@ export async function activateIosCollector(deps) {
   } catch (error) {
     if (started) {
       try { await deps.native.stop(); }
-      catch { throw new CollectorActivationError('Collector stop could not be confirmed. Turn off KICK'S VPN in iOS Settings.'); }
+      catch { throw new CollectorActivationError('Collector stop could not be confirmed. Turn off KICK’S VPN in iOS Settings.'); }
     }
     throw error;
   }
 }
+
