@@ -126,7 +126,7 @@ private actor NativeEnrollment {
 
     func enrolledDeviceId() throws -> String {
         let existing = try record()
-        guard existing.provisioned else { throw failure("This iPad’s enrollment has not been confirmed by the server.") }
+        guard existing.provisioned else { throw failure("This iPad's enrollment has not been confirmed by the server.") }
         return existing.deviceId
     }
 
@@ -241,7 +241,7 @@ private actor NativeEnrollment {
               let port = wireguard["serverPort"] as? Int, (1...65535).contains(port),
               wireguard["addressIPv4"] is String, wireguard["addressIPv6"] is String,
               let dns = wireguard["dnsServers"] as? [String], !dns.isEmpty else {
-            throw failure("The gateway authorization is incomplete or does not match this iPad’s grant.")
+            throw failure("The gateway authorization is incomplete or does not match this iPad's grant.")
         }
         // Never trust an upstream response to supply or replace a device private key.
         wireguard["privateKey"] = existing.privateKey
@@ -319,7 +319,7 @@ private final class KicksTunnelController {
     private func manager() async throws -> NETunnelProviderManager {
         let profiles = try await managers()
         guard profiles.count == 1, let profile = profiles.first else {
-            throw CollectorFailure(message: "A unique KICK’S VPN profile could not be confirmed. Existing profiles were preserved.")
+            throw CollectorFailure(message: "A unique KICK'S VPN profile could not be confirmed. Existing profiles were preserved.")
         }
         return profile
     }
@@ -329,11 +329,11 @@ private final class KicksTunnelController {
         guard let plugins = Bundle.main.builtInPlugInsURL,
               let bundles = try? FileManager.default.contentsOfDirectory(at: plugins, includingPropertiesForKeys: nil),
               bundles.contains(where: { Bundle(url: $0)?.bundleIdentifier == extensionId }) else {
-            throw CollectorFailure(message: "This build does not include the signed KICK’S tunnel extension. Monitoring remains off.")
+            throw CollectorFailure(message: "This build does not include the signed KICK'S tunnel extension. Monitoring remains off.")
         }
         // Do not silently replace duplicate profiles or a profile from another app.
         guard try await managers().count <= 1 else {
-            throw CollectorFailure(message: "Multiple KICK’S VPN profiles require review. Existing profiles were preserved.")
+            throw CollectorFailure(message: "Multiple KICK'S VPN profiles require review. Existing profiles were preserved.")
         }
     }
 
@@ -353,7 +353,7 @@ private final class KicksTunnelController {
         settings.providerConfiguration = ["schemaVersion": 1, "deviceId": config.deviceId,
                                           "permissionId": config.permissionId]
         profile.protocolConfiguration = settings
-        profile.localizedDescription = "KICK’S"
+        profile.localizedDescription = "KICK'S"
         profile.isEnabled = true
         profile.isOnDemandEnabled = false
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -375,7 +375,7 @@ private final class KicksTunnelController {
               settings.providerConfiguration?["permissionId"] as? String == config.permissionId,
               settings.passwordReference == (try readKeychain(reference: true)),
               let session = profile.connection as? NETunnelProviderSession else {
-            throw CollectorFailure(message: "The VPN profile does not match this iPad’s current enrollment.")
+            throw CollectorFailure(message: "The VPN profile does not match this iPad's current enrollment.")
         }
         try session.startVPNTunnel()
     }
@@ -387,7 +387,7 @@ private final class KicksTunnelController {
             if profiles.allSatisfy({ [.disconnected, .invalid].contains($0.connection.status) }) { return }
             try await Task.sleep(nanoseconds: 100_000_000)
         }
-        throw CollectorFailure(message: "Collector stop could not be confirmed. Turn off KICK’S VPN in iOS Settings.")
+        throw CollectorFailure(message: "Collector stop could not be confirmed. Turn off KICK'S VPN in iOS Settings.")
     }
 
     func status() async throws -> [String: Any] {
@@ -397,6 +397,7 @@ private final class KicksTunnelController {
         // The extension evidence protocol must be implemented before enabling this.
         return ["deviceId": (try? configuration().deviceId) ?? "",
                 "permissionId": (try? configuration().permissionId) ?? "",
-                "connected": connected, "consentVerified": false, "collecting": false]
+                "connected": connected, "consentVerified": false, "collecting": false,
+                "unavailableReason": "Native collection verification is unavailable in this build. Request a verified staging extension from support. Collection remains off."]
     }
 }
