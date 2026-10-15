@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      - 'apps/mobile/app/**'
+      - 'apps/mobile/components/**'
+      - 'apps/mobile/services/**'
+      - 'apps/mobile/modules/kicks-tunnel/**'
       - 'apps/mobile/native/PacketTunnel/**'
       - 'apps/mobile/plugins/with-kicks-packet-tunnel.js'
       - 'apps/mobile/plugins/prepare-wireguard-source.js'
