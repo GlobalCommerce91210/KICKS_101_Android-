@@ -29,3 +29,29 @@ test('another device consent cannot authorize this iPad',async()=>{const f=fixtu
 test('connected tunnel without new ingestion evidence is not collecting',async()=>{const f=fixture();f.deps.native.getStatus=async()=>({deviceId:'this-ipad',permissionId:'permission-1',connected:true,consentVerified:true,collecting:true,lastAcceptedObservationAt:'2020-01-01T00:00:00Z'});assert.equal((await activateIosCollector(f.deps)).state,'connected_waiting_for_evidence');});
 test('unverified status stops tunnel',async()=>{const f=fixture();f.deps.native.getStatus=async()=>({connected:true});await assert.rejects(activateIosCollector(f.deps),/could not be verified/);assert.ok(f.calls.includes('stop'));});
 test('failed stop directs user to iOS VPN controls',async()=>{const f=fixture();f.deps.native.getStatus=async()=>null;f.deps.native.stop=async()=>{throw Error('failed');};await assert.rejects(activateIosCollector(f.deps),/iOS Settings/);});
+
+test('native provisioning follows disclosure and lease follows verified grant', async () => {
+  const f = fixture();
+  f.deps.provision = async () => { f.calls.push('provision'); };
+  f.deps.renewLease = async () => { f.calls.push('lease'); };
+  await activateIosCollector(f.deps);
+  assert.ok(f.calls.indexOf('disclosure') < f.calls.indexOf('provision'));
+  assert.ok(f.calls.indexOf('provision') < f.calls.indexOf('device'));
+  assert.ok(f.calls.indexOf('grant') < f.calls.indexOf('lease'));
+  assert.ok(f.calls.indexOf('lease') < f.calls.indexOf('ios_prompt'));
+});
+test('account change during native provisioning prevents consent and VPN prompt', async () => {
+  const f = fixture(); f.deps.provision = async () => { f.subject = 'other'; };
+  await assert.rejects(activateIosCollector(f.deps), /account changed/);
+  assert.ok(!f.calls.includes('grant')); assert.ok(!f.calls.includes('ios_prompt'));
+});
+test('withdrawal during lease request prevents OS authorization', async () => {
+  const f = fixture(); f.deps.renewLease = async () => { f.consent = null; };
+  await assert.rejects(activateIosCollector(f.deps), /withdrawn/);
+  assert.ok(!f.calls.includes('ios_prompt')); assert.ok(!f.calls.includes('start'));
+});
+test('native enrollment failure leaves collection off without saving consent', async () => {
+  const f = fixture(); f.deps.provision = async () => { throw Error('enrollment denied'); };
+  await assert.rejects(activateIosCollector(f.deps), /enrollment denied/);
+  assert.ok(!f.calls.includes('grant')); assert.ok(!f.calls.includes('start'));
+});

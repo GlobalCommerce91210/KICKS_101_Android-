@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, type ErrorBoundaryProps } from 'expo-router';
 import { BrandHeader, Card, Screen, colors, ui } from '../components/Brand';
 import { useSession } from '../components/SessionProvider';
 import { loadConsumerProfile, type ConsumerProfileView } from '../services/profileService';
@@ -19,6 +19,14 @@ function statusText(value: unknown): string {
 
 export default function Profile() {
   return <ConsumerProfile />;
+}
+
+export function ErrorBoundary({ retry }: ErrorBoundaryProps) {
+  return <Screen><BrandHeader section="Consumer profile" /><Card>
+    <Text accessibilityRole="alert" style={ui.body}>Your profile could not be displayed. Your account and saved data have not been cleared.</Text>
+    <Pressable onPress={retry}><Text style={ui.orange}>Try again</Text></Pressable>
+    <Pressable onPress={() => router.replace('/account')}><Text style={ui.orange}>Open account</Text></Pressable>
+  </Card></Screen>;
 }
 
 function ConsumerProfile() {
@@ -46,7 +54,6 @@ function ConsumerProfile() {
 
   useEffect(() => {
     setProfile(null); setError(null);
-    if (ready && !user) router.replace('/account');
   }, [ready, user]);
 
   useFocusEffect(useCallback(() => {
@@ -54,11 +61,15 @@ function ConsumerProfile() {
     return () => { ++requestId.current; };
   }, [ready, user, refresh]));
 
-  if (ready && !user) return null;
+  if (ready && !user) return <Screen><BrandHeader section="Consumer profile" /><Card>
+    <Text style={ui.h2}>Sign in to view your profile</Text>
+    <Text style={ui.body}>Use your DataStorm account to continue.</Text>
+    <Pressable onPress={() => router.replace('/account')}><Text style={s.link}>Open sign in</Text></Pressable>
+  </Card></Screen>;
   if (!ready || (loading && !profile)) {
     return <Screen><BrandHeader section="Consumer profile" /><Card><ActivityIndicator color={colors.orange} /><Text style={ui.body}>Loading your DataStorm account…</Text></Card></Screen>;
   }
-  if (!user) return null;
+  if (!user) return <Screen><Text style={ui.body}>Checking your account…</Text></Screen>;
 
   const activePermissions = profile?.permissions ? countOf((profile.permissions as any).apps) : null;
   const revoked = typeof (profile?.snapshot as any)?.permissions?.revoked === 'number' ? (profile?.snapshot as any).permissions.revoked : null;

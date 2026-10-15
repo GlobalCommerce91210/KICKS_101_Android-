@@ -1,3 +1,10 @@
+CREATE TABLE devices (
+  id uuid PRIMARY KEY, subject_id uuid NOT NULL, token_hash text NOT NULL UNIQUE,
+  environment text NOT NULL CHECK (environment IN ('staging','production')),
+  revoked_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
+);
+
+
 CREATE TABLE consent_events (
   id uuid PRIMARY KEY, subject_id uuid NOT NULL, permission_id uuid NOT NULL,
   action text NOT NULL CHECK (action IN ('grant','deny','revoke')),
@@ -32,8 +39,3 @@ CREATE TABLE audit_events (
   correlation_id uuid NOT NULL, metadata jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 REVOKE UPDATE, DELETE ON audit_events FROM PUBLIC;
-CREATE TABLE devices (
-  id uuid PRIMARY KEY, subject_id uuid NOT NULL, token_hash text NOT NULL UNIQUE,
-  environment text NOT NULL CHECK (environment IN ('staging','production')),
-  revoked_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
-);

@@ -44,6 +44,9 @@ function fixture(options = {}) {
     const transport = async (url, init = {}) => {
         const path = String(url).replace('https://beta.example.test', '');
         calls.push({ path, init });
+        if (path.endsWith('/account') && init.method === 'POST') {
+            return Response.json({ account: { subject_id: 'ds-sub', email: 'owner@example.test', account_status: 'pending_verification' } }, { status: 201 });
+        }
         if (path.endsWith('/session/refresh')) {
             refreshes++;
             return Response.json({ access_token: 'rotated-access', refresh_token: 'rotated-refresh', token_type: 'Bearer', expires_in: 900 });
@@ -161,4 +164,45 @@ test('rejected refresh clears identity even before the old access token expires'
   assert.equal(manager.user, null);
   assert.equal(f.saved, null);
   assert.ok(!f.calls.some(call => call.path === '/core/consumer/v1/devices'));
+});
+
+test('native provisioning shares the current refresh flow without persisting a bearer', async () => {
+  const f = fixture({ expired: true });
+  await f.manager.login('owner@example.test', 'password');
+  let handedOff;
+  const native = { async provision(origin, bearer, subject) { handedOff = {origin,bearer,subject}; return 'ipad'; } };
+  const [device] = await Promise.all([f.manager.provisionIosCollector(native), f.manager.request('/core/consumer/v1/devices')]);
+  assert.equal(device, 'ipad'); assert.equal(f.refreshes, 1);
+  assert.equal(handedOff.bearer, 'rotated-access');
+  assert.ok(!f.saved.includes('rotated-access'));
+});
+test('logout while native provisioning is pending rejects its public result', async () => {
+  const f = fixture(); await f.manager.login('owner@example.test', 'password');
+  let release; let entered;
+  const gate = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { entered = resolve; });
+  const pending = f.manager.provisionIosCollector({ async provision() { entered(); await gate; return 'ipad'; } });
+  await started; await f.manager.logout(); release();
+  await assert.rejects(pending, /session changed/);
+  assert.equal(f.manager.user, null);
+});
+
+test('register posts account with idempotency and then signs in through the normal session flow', async () => {
+  const f = fixture();
+  await f.manager.register(' new@example.test ', 'A-Strong-Password-2026', {
+    termsVersion: 'terms-test',
+    privacyVersion: 'privacy-test',
+    marketingOptIn: true,
+  });
+  const create = f.calls.find(call => call.path === '/core/identity/v1/account' && call.init.method === 'POST');
+  assert.ok(create);
+  const headers = new Headers(create.init.headers);
+  assert.ok((headers.get('idempotency-key') ?? '').length >= 16);
+  const body = JSON.parse(create.init.body);
+  assert.equal(body.email, 'new@example.test');
+  assert.equal(body.terms_version, 'terms-test');
+  assert.equal(body.privacy_version, 'privacy-test');
+  assert.equal(body.marketing_opt_in, true);
+  assert.equal(f.manager.user?.subjectId, 'ds-sub');
+  assert.ok(f.calls.some(call => call.path === '/core/identity/v1/session' && call.init.method === 'POST'));
 });

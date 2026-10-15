@@ -1,0 +1,32 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { MemoryIosDeviceProvisioner } from './ios-device-provisioning.js';
+import { MemoryConsumerIdentityStore } from './consumer-identity.js';
+import { MemoryConsumerDeviceBindingStore } from './consumer-device-bindings.js';
+import { buildServer,memoryStore } from './server.js';
+
+test('account-authorized native proof provisioning is idempotent, preserves existing devices and grants no consent',async t=>{
+  const store=memoryStore();const bindings=new MemoryConsumerDeviceBindingStore();const identity=new MemoryConsumerIdentityStore();
+  const provisioner=new MemoryIosDeviceProvisioner(store,bindings);
+  const app=buildServer({store,consumerDeviceBindingStore:bindings,consumerIdentityStore:identity,iosDeviceProvisioner:provisioner});t.after(()=>app.close());
+  const account=await app.inject({method:'POST',url:'/core/identity/v1/account',headers:{'idempotency-key':randomUUID()},payload:{email:'native-enroll@example.test',password:'Synthetic-Password-2026',terms_version:'one',privacy_version:'one'}});
+  const subjectId=account.json().account.subject_id;const session=await identity.issueSessionForSubject(subjectId);assert.ok(session);
+  const input={requestId:randomUUID(),deviceId:randomUUID(),deviceToken:randomBytes(32).toString('base64url'),publicKey:randomBytes(32).toString('base64')};
+  const url='/core/consumer/v1/ios-devices/provision';const headers={authorization:'Bearer '+session.access_token};
+  assert.equal((await app.inject({method:'POST',url,payload:input})).statusCode,401);
+  const first=await app.inject({method:'POST',url,headers,payload:input});assert.equal(first.statusCode,201);
+  assert.deepEqual(first.json(),{deviceId:input.deviceId,accountSubjectId:subjectId,status:'provisioned'});
+  const replay=await app.inject({method:'POST',url,headers,payload:input});assert.equal(replay.statusCode,200);assert.equal(replay.json().status,'replayed');
+  const device=store.devices.get(input.deviceId)!;assert.ok(device);assert.notEqual(device.subjectId,subjectId);
+  assert.ok(!JSON.stringify(device).includes(input.deviceToken));assert.equal(store.consents.length,0);
+  assert.equal((await bindings.list(subjectId))[0]?.collector_subject_id,device.subjectId);
+  assert.equal((await app.inject({method:'POST',url,headers,payload:{...input,deviceToken:randomBytes(32).toString('base64url')}})).statusCode,409);
+  assert.equal((await app.inject({method:'POST',url,headers,payload:{...input,requestId:randomUUID()}})).statusCode,409);
+  assert.equal((await app.inject({method:'POST',url,headers,payload:{...input,deviceId:randomUUID(),requestId:randomUUID()}})).statusCode,409);
+  assert.equal(store.devices.size,1);assert.deepEqual(store.devices.get(input.deviceId),device);
+  assert.equal((await app.inject({method:'POST',url,headers,payload:{...input,accountSubjectId:'injected'}})).statusCode,422);
+  await bindings.revoke(subjectId,input.deviceId);
+  assert.equal((await app.inject({method:'POST',url,headers,payload:input})).statusCode,409);
+  await assert.rejects(provisioner.provision({...input,accountSubjectId:'different-account'}));
+});

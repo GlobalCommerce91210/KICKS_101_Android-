@@ -1,0 +1,38 @@
+[Unit]
+Description=KICKS isolated staging WireGuard peer authority
+After=network-online.target wg-quick@kicks-staging.service
+Wants=network-online.target
+Requires=wg-quick@kicks-staging.service
+
+[Service]
+Type=notify
+NotifyAccess=all
+User=root
+Group=root
+WorkingDirectory=/opt/kicks-ios-gateway
+RuntimeDirectory=kicks-ios-gateway
+RuntimeDirectoryMode=0700
+UMask=0077
+LoadCredential=authority-token:/etc/kicks-ios-gateway/authority-token
+ExecStart=/usr/bin/node /opt/kicks-ios-gateway/host-runner.mjs
+ExecStopPost=/usr/bin/node /opt/kicks-ios-gateway/host-runner.mjs --clear
+Restart=on-failure
+RestartSec=2s
+WatchdogSec=10s
+TimeoutStartSec=10s
+TimeoutStopSec=8s
+KillMode=control-group
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
+ReadWritePaths=/run/kicks-ios-gateway
+
+[Install]
+WantedBy=multi-user.target

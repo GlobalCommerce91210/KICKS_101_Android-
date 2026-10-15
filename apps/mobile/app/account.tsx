@@ -13,6 +13,11 @@ function ConsumerAccount() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<'signin' | 'create'>('signin');
+  const [legalAccepted, setLegalAccepted] = useState(false);
+  const [marketingOptIn, setMarketingOptIn] = useState(false);
+  const termsVersion = process.env.EXPO_PUBLIC_TERMS_VERSION ?? '';
+  const privacyVersion = process.env.EXPO_PUBLIC_PRIVACY_VERSION ?? '';
   const [error, setError] = useState<string | null>(null);
   const act = async (action: () => Promise<void>) => {
     if (busy) return;
@@ -31,15 +36,34 @@ function ConsumerAccount() {
       <Pressable disabled={busy} onPress={() => router.push('/permissions')}><Text style={s.link}>Review permissions</Text></Pressable>
       <Pressable disabled={busy} onPress={() => act(() => manager.logout())}><Text style={s.link}>Sign out</Text></Pressable>
     </Card> : <Card>
-      <Text style={ui.h2}>Sign in to DataStorm</Text>
+      <Text style={ui.h2}>{mode === 'create' ? 'Create your DataStorm account' : 'Sign in to DataStorm'}</Text>
       <Text style={ui.label}>EMAIL</Text>
       <TextInput accessibilityLabel="Email" style={s.input} value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} autoComplete="email" editable={!busy} placeholder="Your email" placeholderTextColor={colors.muted} />
       <Text style={ui.label}>PASSWORD</Text>
       <TextInput accessibilityLabel="Password" style={s.input} value={password} onChangeText={setPassword} secureTextEntry autoCapitalize="none" autoCorrect={false} autoComplete="current-password" editable={!busy} placeholder="Your password" placeholderTextColor={colors.muted} />
-      <Pressable accessibilityRole="button" disabled={busy || !email.trim() || !password} onPress={() => act(() => manager.login(email, password).then(() => { router.replace('/profile'); }))}>
-        <Text style={s.link}>{busy ? 'Signing in…' : 'Sign in'}</Text>
+      {mode === 'create' && <>
+        <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: legalAccepted }} disabled={busy}
+          onPress={() => setLegalAccepted(value => !value)}>
+          <Text style={s.link}>{legalAccepted ? '☑' : '☐'} I agree to the DataStorm Terms and Privacy Notice.</Text>
+        </Pressable>
+        <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: marketingOptIn }} disabled={busy}
+          onPress={() => setMarketingOptIn(value => !value)}>
+          <Text style={s.link}>{marketingOptIn ? '☑' : '☐'} Send me optional DataStorm product updates.</Text>
+        </Pressable>
+      </>}
+      <Pressable accessibilityRole="button"
+        disabled={busy || !email.trim() || !password || (mode === 'create' && (!legalAccepted || password.length < 12 || !termsVersion || !privacyVersion))}
+        onPress={() => act(() => (mode === 'create'
+          ? manager.register(email, password, { termsVersion, privacyVersion, marketingOptIn })
+          : manager.login(email, password)).then(() => { router.replace('/profile'); }))}>
+        <Text style={s.link}>{busy ? (mode === 'create' ? 'Creating account…' : 'Signing in…') : (mode === 'create' ? 'Create account' : 'Sign in')}</Text>
       </Pressable>
-      <Text style={ui.body}>Use the DataStorm account you already created. Account creation and recovery are handled by DataStorm.</Text>
+      {mode === 'create' && (!termsVersion || !privacyVersion) &&
+        <Text accessibilityRole="alert" style={ui.body}>Account registration is disabled until this build is configured with the current Terms and Privacy versions.</Text>}
+      <Pressable disabled={busy} onPress={() => { setMode(mode === 'create' ? 'signin' : 'create'); setError(null); }}>
+        <Text style={s.link}>{mode === 'create' ? 'Already have an account? Sign in' : 'New to DataStorm? Create an account'}</Text>
+      </Pressable>
+      <Text style={ui.body}>Signing in or creating an account does not authorize monitoring or data sharing.</Text>
     </Card>}
     {(error || sessionWarning || (!user && restoreError)) && <Card>
       <Text accessibilityRole="alert" style={ui.body}>{error ?? sessionWarning ?? restoreError}</Text>

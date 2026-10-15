@@ -13,6 +13,7 @@ export async function activateIosCollector(deps) {
   if (!deps.native) throw new CollectorActivationError('This build does not include the iOS collector. Monitoring remains off.');
   let started = false;
   try {
+    if (deps.provision) { await deps.provision(); current(); }
     const deviceId = await deps.native.getDeviceId();
     current();
     if (!deviceId) throw new CollectorActivationError('Enroll this iPad before starting monitoring.');
@@ -28,6 +29,11 @@ export async function activateIosCollector(deps) {
       consent = await deps.readConsent(deviceId); current();
     }
     if (!matches(consent)) throw new CollectorActivationError('Saved consent could not be verified. Monitoring remains off.');
+    if (deps.renewLease) {
+      await deps.renewLease(); current();
+      consent = await deps.readConsent(deviceId); current();
+      if (!matches(consent)) throw new CollectorActivationError('Permission was withdrawn. Monitoring remains off.');
+    }
     deps.onState('vpn_authorization');
     const authorization = await deps.native.requestAuthorization(); current();
     if (authorization !== 'authorized') return { state: 'off', reason: 'vpn_not_authorized' };

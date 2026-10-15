@@ -11,6 +11,13 @@
       }
     },
     "ios-device": {
+      "env": {
+        "KICKS_BUILD_PLATFORM": "ios",
+        "KICKS_IOS_NATIVE_TUNNEL": "1",
+        "EXPO_PUBLIC_IOS_API_URL": "https://staging-api.datastorminc.live",
+        "EXPO_PUBLIC_TERMS_VERSION": "KC-CON-01-v1.0",
+        "EXPO_PUBLIC_PRIVACY_VERSION": "KC-CON-02-v1.0"
+      },
       "distribution": "internal",
       "credentialsSource": "remote",
       "autoIncrement": true,
