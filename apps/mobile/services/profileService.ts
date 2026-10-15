@@ -76,9 +76,9 @@ export async function loadConsumerProfile(manager: SessionManager): Promise<Cons
     optionalJson(manager, '/v1/me/consumer-state', 'consumer state', unavailable),
     optionalJson(manager, '/core/consumer/v1/snapshot', 'consumer snapshot', unavailable),
     optionalJson(manager, '/core/consumer/v1/devices', 'connected devices', unavailable),
-    optionalJson(manager, `/v1/permissions/users/${encodedSubject}/effective`, 'permissions', unavailable),
-    optionalJson(manager, `/v1/permissions/users/${encodedSubject}/consent-log?page=1&page_size=25`, 'consent history', unavailable),
-    optionalJson(manager, `/v1/wallet/${encodedSubject}`, 'wallet', unavailable)
+    optionalJson(manager, '/core/consumer/v1/permissions/effective', 'permissions', unavailable),
+    optionalJson(manager, '/core/consumer/v1/permissions/consent-log?page=1&page_size=25', 'consent history', unavailable),
+    optionalJson(manager, '/core/consumer/v1/wallet', 'wallet', unavailable)
   ]);
 
   const devices = Array.isArray(devicesView) ? devicesView : Array.isArray(devicesView?.devices) ? devicesView.devices : [];

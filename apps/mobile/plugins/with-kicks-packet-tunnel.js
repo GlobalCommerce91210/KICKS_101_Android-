@@ -69,7 +69,8 @@ module.exports = function withKicksPacketTunnel(config) {
         INFOPLIST_FILE: `"${TARGET}/${TARGET}-Info.plist"`,
         CURRENT_PROJECT_VERSION: mainSettings.CURRENT_PROJECT_VERSION ?? '1',
         MARKETING_VERSION: mainSettings.MARKETING_VERSION ?? '0.2.6',
-        DEVELOPMENT_TEAM: mainSettings.DEVELOPMENT_TEAM ?? '""',
+        DEVELOPMENT_TEAM: mainSettings.DEVELOPMENT_TEAM && mainSettings.DEVELOPMENT_TEAM !== '""'
+          ? mainSettings.DEVELOPMENT_TEAM : mod.ios?.appleTeamId ?? '""',
         LIBRARY_SEARCH_PATHS: ['"$(inherited)"', '"$(CONFIGURATION_BUILD_DIR)"'],
         // Xcode 26 does not propagate this pinned package's root-level custom
         // Clang module maps to Swift consumers. Reference the original maps.
@@ -105,6 +106,8 @@ module.exports = function withKicksPacketTunnel(config) {
     // Declare both a target edge and the actual archive output dependency.
     const bridgeName = 'KicksWireGuardBridge';
     const bridgeScript = 'set -eu\n' +
+        'unset GOROOT\n' +
+        'export PATH="$SRCROOT/../.eas-tools/go/bin:$PATH"\n' +
         'test "$PLATFORM_NAME" = iphoneos || { echo "KICKS tunnel validation requires iphoneos; simulator unsupported" >&2; exit 1; }\n' +
         'go version | grep -Eq "go1\\.19([. ]|$)" || { echo "Pinned WireGuard bridge requires Go 1.19" >&2; exit 1; }\n' +
         'WG_SOURCE="$SRCROOT/vendor/wireguard-apple/Sources/WireGuardKitGo"\n' +

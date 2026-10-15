@@ -19,7 +19,7 @@ test('hydrates profile from the verified DataStorm subject and keeps device iden
       if (path === '/core/consumer/v1/devices') return response({ devices: [{ device_id: 'device-1', collector_status: 'healthy' }] });
       if (path.endsWith('/effective')) return response({ apps: [{ app_id: 'app-1' }] });
       if (path.includes('/consent-log?')) return response({ items: [{ log_id: 'log-1' }] });
-      if (path === '/v1/wallet/ds-sub') return response({ total_earned: 4.25, total_pending: 1, total_settled: 3.25 });
+      if (path === '/core/consumer/v1/wallet') return response({ total_earned: 4.25, total_pending: 1, total_settled: 3.25 });
       return response({ error: 'not_found' }, 404);
     }
   };
@@ -29,7 +29,7 @@ test('hydrates profile from the verified DataStorm subject and keeps device iden
   assert.equal(view.devices[0].device_id, 'device-1');
   assert.equal(view.monitoring.status, 'active');
   assert.equal(view.wallet.total_earned, 4.25);
-  assert.ok(calls.includes('/v1/permissions/users/ds-sub/effective'));
+  assert.ok(calls.includes('/core/consumer/v1/permissions/effective'));
   assert.ok(calls.every(path => !path.includes('device-1/effective')));
 });
 

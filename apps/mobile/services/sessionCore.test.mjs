@@ -44,6 +44,9 @@ function fixture(options = {}) {
     const transport = async (url, init = {}) => {
         const path = String(url).replace('https://beta.example.test', '');
         calls.push({ path, init });
+        if (path.endsWith('/account') && init.method === 'POST') {
+            return Response.json({ account: { subject_id: 'ds-sub', email: 'owner@example.test', account_status: 'pending_verification' } }, { status: 201 });
+        }
         if (path.endsWith('/session/refresh')) {
             refreshes++;
             return Response.json({ access_token: 'rotated-access', refresh_token: 'rotated-refresh', token_type: 'Bearer', expires_in: 900 });
@@ -182,4 +185,24 @@ test('logout while native provisioning is pending rejects its public result', as
   await started; await f.manager.logout(); release();
   await assert.rejects(pending, /session changed/);
   assert.equal(f.manager.user, null);
+});
+
+test('register posts account with idempotency and then signs in through the normal session flow', async () => {
+  const f = fixture();
+  await f.manager.register(' new@example.test ', 'A-Strong-Password-2026', {
+    termsVersion: 'terms-test',
+    privacyVersion: 'privacy-test',
+    marketingOptIn: true,
+  });
+  const create = f.calls.find(call => call.path === '/core/identity/v1/account' && call.init.method === 'POST');
+  assert.ok(create);
+  const headers = new Headers(create.init.headers);
+  assert.ok((headers.get('idempotency-key') ?? '').length >= 16);
+  const body = JSON.parse(create.init.body);
+  assert.equal(body.email, 'new@example.test');
+  assert.equal(body.terms_version, 'terms-test');
+  assert.equal(body.privacy_version, 'privacy-test');
+  assert.equal(body.marketing_opt_in, true);
+  assert.equal(f.manager.user?.subjectId, 'ds-sub');
+  assert.ok(f.calls.some(call => call.path === '/core/identity/v1/session' && call.init.method === 'POST'));
 });
