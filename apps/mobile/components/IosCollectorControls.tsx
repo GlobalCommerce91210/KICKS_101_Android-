@@ -95,6 +95,7 @@ export function IosCollectorControls({ disabled = false, onBusyChange }: { disab
       setState('checking');
       void usableNative.getStatus().then(status => {
         if (!mounted.current) return;
+        if (status.unavailableReason) setError(status.unavailableReason);
         setState(status.connected === true || status.collecting === true ? 'connected_waiting_for_evidence' : 'off');
       }).catch(() => {
         if (mounted.current) { setState('stop_unconfirmed'); setError('Existing VPN status could not be confirmed. Check KICK'S VPN in iOS Settings.'); }
