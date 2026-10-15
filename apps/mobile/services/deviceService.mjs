@@ -21,13 +21,13 @@ export async function revokeAndUnlinkDevice(manager, deviceId, policy, native, r
     try { localId = await native.getDeviceId(); }
     catch {
       const status = await native.getStatus(); current();
-      if (status.connected || status.collecting) throw new Error('Current collector identity could not be confirmed. Turn off KICK'S in iOS VPN Settings, then retry.');
+      if (status.connected || status.collecting) throw new Error('Current collector identity could not be confirmed. Turn off KICK’S in iOS VPN Settings, then retry.');
     }
     current();
     if (localId === deviceId) {
       await native.stop(); current();
       const status = await native.getStatus(); current();
-      if (status.connected || status.collecting) throw new Error('Stop could not be confirmed. Turn off KICK'S in iOS VPN Settings, then retry.');
+      if (status.connected || status.collecting) throw new Error('Stop could not be confirmed. Turn off KICK’S in iOS VPN Settings, then retry.');
     }
   }
   const path = '/core/consumer/v1/devices/' + encodeURIComponent(deviceId);
