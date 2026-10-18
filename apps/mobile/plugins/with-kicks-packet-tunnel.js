@@ -62,6 +62,7 @@ module.exports = function withKicksPacketTunnel(config) {
     // so Xcode has an explicit pre-link dependency instead of a best-effort script.
     const wireGuardPhase = project.addBuildPhase([], 'PBXShellScriptBuildPhase', 'Build WireGuard Go bridge', extension.uuid, {
       shellPath: '/bin/sh', shellScript: 'set -eu\\n' +
+        'export PATH="$SRCROOT/../.eas-tools/go/bin:$PATH"\\n' +
         'test "$PLATFORM_NAME" = iphoneos || { echo "KICKS tunnel validation requires iphoneos; simulator unsupported" >&2; exit 1; }\\n' +
         'go version | grep -Eq "go1\\\\.19([. ]|$)" || { echo "Pinned WireGuard bridge requires Go 1.19" >&2; exit 1; }\\n' +
         'WG_SOURCE="$SRCROOT/vendor/wireguard-apple/Sources/WireGuardKitGo"\\n' +
