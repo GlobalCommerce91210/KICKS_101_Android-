@@ -86,7 +86,8 @@ module.exports = function withKicksPacketTunnel(config) {
         INFOPLIST_FILE: `"${TARGET}/${TARGET}-Info.plist"`,
         CURRENT_PROJECT_VERSION: mainSettings.CURRENT_PROJECT_VERSION ?? '1',
         MARKETING_VERSION: mainSettings.MARKETING_VERSION ?? '0.2.6',
-        DEVELOPMENT_TEAM: mainSettings.DEVELOPMENT_TEAM ?? '""',
+        // EAS configures the app target after prebuild; the extension must carry the same Apple team now.
+        DEVELOPMENT_TEAM: '"CV47H4YVDC"',
         LIBRARY_SEARCH_PATHS: ['"$(inherited)"', '"$(CONFIGURATION_BUILD_DIR)"', '"$(SRCROOT)/vendor/wireguard-apple/Sources/WireGuardKitGo/out"'],
         // Xcode 26 does not propagate this pinned package's root-level custom
         // Clang module maps to Swift consumers. Reference the original maps.
