@@ -14,7 +14,23 @@ module.exports = ({ config }) => {
     owner: 'datastorm-inc',
     extra: {
       ...config.extra,
-      eas: { projectId: '1d2a0901-41c9-4026-b835-139e785db502' },
+      eas: {
+        projectId: '1d2a0901-41c9-4026-b835-139e785db502',
+        build: {
+          experimental: {
+            ios: {
+              appExtensions: [{
+                targetName: 'KicksPacketTunnel',
+                bundleIdentifier: 'com.datastorm.kicks.PacketTunnel',
+                entitlements: {
+                  'com.apple.developer.networking.networkextension': ['packet-tunnel-provider'],
+                  'keychain-access-groups': ['$(AppIdentifierPrefix)com.datastorm.kicks.collector'],
+                },
+              }],
+            },
+          },
+        },
+      },
     },
   };
 };
