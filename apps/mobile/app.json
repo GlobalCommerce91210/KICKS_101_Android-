@@ -1,7 +1,8 @@
 {
   "expo": {
     "name": "KICK’S",
-    "slug": "kicks-app",
+    "slug": "ezekiel-ios",
+    "owner": "datastorm-inc",
     "scheme": "kicks",
     "version": "0.2.6",
     "orientation": "portrait",
@@ -16,7 +17,10 @@
       }
     },
     "extra": {
-      "trafficMode": "demo"
+      "trafficMode": "demo",
+      "eas": {
+        "projectId": "1d2a0901-41c9-4026-b835-139e785db502"
+      }
     },
     "ios": {
       "bundleIdentifier": "com.datastorm.kicks",
