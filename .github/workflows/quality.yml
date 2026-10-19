@@ -9,7 +9,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20, cache: npm }
-      - run: npm ci
+        with:
+          node-version: 20
+      # This branch does not track a dependency lockfile. npm caching and
+      # npm ci require one; use npm install until a lockfile is committed.
+      - run: npm install
       - run: npm run typecheck
       - run: npm test

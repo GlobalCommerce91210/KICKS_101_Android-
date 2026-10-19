@@ -1,0 +1,899 @@
+openapi: 3.0.3
+info:
+  title: DataStorm Inc + KICK'S Unified API
+  version: 1.0.0
+  description: >
+    Core backend for DataStorm (enterprise, partner, governance) and KICK'S (consumer, app, rewards).
+
+servers:
+  - url: https://api.datastorminc.live
+    description: DataStorm core (partner, governance, education)
+  - url: https://api.kicks.datastorminc.live
+    description: KICK'S consumer + app
+
+tags:
+  - name: Auth
+  - name: Organizations
+  - name: Studies
+  - name: Cohorts
+  - name: Contracts
+  - name: Billing
+  - name: Governance
+  - name: ConsumerAuth
+  - name: Opportunities
+  - name: ConsumerStudies
+  - name: Permissions
+  - name: Earnings
+  - name: Rewards
+  - name: Ledger
+  - name: Activity
+  - name: AuditLog
+
+paths:
+  /auth/login:
+    post:
+      tags: [Auth, ConsumerAuth]
+      summary: Login (partner or consumer, depending on server)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid credentials
+
+  /auth/logout:
+    post:
+      tags: [Auth, ConsumerAuth]
+      summary: Logout current session
+      responses:
+        '204':
+          description: Logged out
+
+  /auth/refresh:
+    post:
+      tags: [Auth, ConsumerAuth]
+      summary: Refresh access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  /me:
+    get:
+      tags: [Auth, ConsumerAuth]
+      summary: Get current user profile
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /orgs:
+    get:
+      tags: [Organizations]
+      summary: List organizations (partner side)
+      responses:
+        '200':
+          description: Organizations list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Organization'
+
+  /orgs/{orgId}:
+    get:
+      tags: [Organizations]
+      summary: Get organization by ID
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Organization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+
+    patch:
+      tags: [Organizations]
+      summary: Update organization
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationUpdate'
+      responses:
+        '200':
+          description: Updated organization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+
+  /studies:
+    get:
+      tags: [Studies, ConsumerStudies]
+      summary: List studies (partner or consumer view)
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, recruiting, running, completed]
+      responses:
+        '200':
+          description: Studies list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Study'
+
+    post:
+      tags: [Studies]
+      summary: Create study (partner)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StudyCreate'
+      responses:
+        '201':
+          description: Study created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Study'
+
+  /studies/{studyId}:
+    get:
+      tags: [Studies, ConsumerStudies]
+      summary: Get study by ID
+      parameters:
+        - name: studyId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Study
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Study'
+
+    patch:
+      tags: [Studies]
+      summary: Update study (partner)
+      parameters:
+        - name: studyId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StudyUpdate'
+      responses:
+        '200':
+          description: Updated study
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Study'
+
+  /studies/{studyId}/cohorts:
+    get:
+      tags: [Cohorts]
+      summary: List cohorts for a study
+      parameters:
+        - name: studyId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cohorts list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Cohort'
+
+  /cohorts:
+    get:
+      tags: [Cohorts]
+      summary: List cohorts
+      responses:
+        '200':
+          description: Cohorts list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Cohort'
+
+  /contracts:
+    get:
+      tags: [Contracts]
+      summary: List contracts & licenses
+      responses:
+        '200':
+          description: Contracts list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Contract'
+
+  /contracts/{contractId}:
+    get:
+      tags: [Contracts]
+      summary: Get contract by ID
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Contract
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+
+    patch:
+      tags: [Contracts]
+      summary: Update contract
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContractUpdate'
+      responses:
+        '200':
+          description: Updated contract
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+
+  /billing/invoices:
+    get:
+      tags: [Billing]
+      summary: List invoices (partner)
+      responses:
+        '200':
+          description: Invoices list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Invoice'
+
+  /billing/summary:
+    get:
+      tags: [Billing]
+      summary: Billing summary
+      responses:
+        '200':
+          description: Billing summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingSummary'
+
+  /governance/dkos:
+    get:
+      tags: [Governance]
+      summary: Get DKOS documentation
+      responses:
+        '200':
+          description: DKOS content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GovernanceDoc'
+
+  /governance/deos:
+    get:
+      tags: [Governance]
+      summary: Get DEOS documentation
+      responses:
+        '200':
+          description: DEOS content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GovernanceDoc'
+
+  /governance/eapr:
+    get:
+      tags: [Governance]
+      summary: Get EAPR documentation
+      responses:
+        '200':
+          description: EAPR content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GovernanceDoc'
+
+  /governance/policies:
+    get:
+      tags: [Governance]
+      summary: List governance policies
+      responses:
+        '200':
+          description: Policies list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GovernancePolicy'
+
+  /opportunities:
+    get:
+      tags: [Opportunities]
+      summary: List consumer opportunities (KICK'S)
+      parameters:
+        - name: matchStrength
+          in: query
+          schema:
+            type: string
+            enum: [strong, compatible, weak]
+      responses:
+        '200':
+          description: Opportunities list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Opportunity'
+
+  /opportunities/{id}:
+    get:
+      tags: [Opportunities]
+      summary: Get opportunity by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Opportunity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Opportunity'
+
+  /opportunities/{id}/accept:
+    post:
+      tags: [Opportunities]
+      summary: Accept opportunity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Opportunity accepted
+
+  /opportunities/{id}/decline:
+    post:
+      tags: [Opportunities]
+      summary: Decline opportunity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Opportunity declined
+
+  /permissions:
+    get:
+      tags: [Permissions]
+      summary: List consumer permissions
+      responses:
+        '200':
+          description: Permissions list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Permission'
+
+  /permissions/{id}:
+    get:
+      tags: [Permissions]
+      summary: Get permission by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Permission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Permission'
+
+  /permissions/{id}/update:
+    post:
+      tags: [Permissions]
+      summary: Update permission settings
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PermissionUpdate'
+      responses:
+        '200':
+          description: Updated permission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Permission'
+
+  /permissions/{id}/revoke:
+    post:
+      tags: [Permissions]
+      summary: Revoke permission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Permission revoked
+
+  /earnings/summary:
+    get:
+      tags: [Earnings]
+      summary: Earnings summary for consumer
+      responses:
+        '200':
+          description: Earnings summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EarningsSummary'
+
+  /earnings/history:
+    get:
+      tags: [Earnings]
+      summary: Earnings history
+      responses:
+        '200':
+          description: Earnings history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EarningsEntry'
+
+  /rewards/tiers:
+    get:
+      tags: [Rewards]
+      summary: Rewards tiers
+      responses:
+        '200':
+          description: Rewards tiers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RewardTier'
+
+  /rewards/ledger:
+    get:
+      tags: [Rewards, Ledger]
+      summary: Rewards & settlement ledger
+      responses:
+        '200':
+          description: Ledger entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LedgerEntry'
+
+  /ledger:
+    get:
+      tags: [Ledger]
+      summary: Settlement ledger
+      responses:
+        '200':
+          description: Ledger entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LedgerEntry'
+
+  /activity:
+    get:
+      tags: [Activity]
+      summary: Activity feed
+      responses:
+        '200':
+          description: Activity events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ActivityEvent'
+
+  /audit-log:
+    get:
+      tags: [AuditLog]
+      summary: Initial snapshot of audit log
+      responses:
+        '200':
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditLogEntry'
+
+components:
+  schemas:
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required: [email, password]
+
+    RefreshRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+      required: [refreshToken]
+
+    AuthResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+          enum: [partner, consumer, admin]
+        email:
+          type: string
+        name:
+          type: string
+
+    Organization:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+
+    OrganizationUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+
+    Study:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+
+    StudyCreate:
+      type: object
+      properties:
+        name:
+          type: string
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+
+    StudyUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+
+    Cohort:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        size:
+          type: integer
+
+    Contract:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        effectiveDate:
+          type: string
+          format: date
+
+    ContractUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+
+    Invoice:
+      type: object
+      properties:
+        id:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+
+    BillingSummary:
+      type: object
+      properties:
+        totalDue:
+          type: number
+        totalPaid:
+          type: number
+
+    GovernanceDoc:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        body:
+          type: string
+
+    GovernancePolicy:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+
+    Opportunity:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        sponsor:
+          type: string
+        matchStrength:
+          type: string
+        compensation:
+          type: number
+        duration:
+          type: string
+
+    Permission:
+      type: object
+      properties:
+        id:
+          type: string
+        studyId:
+          type: string
+        categories:
+          type: array
+          items:
+            type: string
+        expiresAt:
+          type: string
+          format: date-time
+
+    PermissionUpdate:
+      type: object
+      properties:
+        categories:
+          type: array
+          items:
+            type: string
+
+    EarningsSummary:
+      type: object
+      properties:
+        totalEarned:
+          type: number
+        pending:
+          type: number
+
+    EarningsEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        amount:
+          type: number
+        date:
+          type: string
+          format: date
+
+    RewardTier:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        threshold:
+          type: number
+
+    LedgerEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        amount:
+          type: number
+        date:
+          type: string
+          format: date
+        status:
+          type: string
+
+    ActivityEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        message:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    AuditLogEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        actor:
+          type: string
+        action:
+          type: string
+        target:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
