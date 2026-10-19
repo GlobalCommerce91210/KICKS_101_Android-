@@ -1,0 +1,90 @@
+name: ios-validation
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/mobile/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/ios-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ios-simulator-build:
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Typecheck mobile workspace
+        run: npm --workspace @kicks/mobile run typecheck
+
+      - name: Select Xcode 26.6 (Expo SDK 57 compatible)
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          xcodebuild -version
+          swift --version
+
+      - name: Record Xcode environment
+        run: xcodebuild -version
+
+      - name: Validate Expo config
+        working-directory: apps/mobile
+        run: npx expo config --type public
+
+      - name: Generate iOS native project
+        working-directory: apps/mobile
+        run: npx expo prebuild --platform ios --clean --no-install
+
+      - name: Install CocoaPods dependencies
+        working-directory: apps/mobile/ios
+        run: pod install
+
+      - name: Build unsigned iOS Simulator app
+        working-directory: apps/mobile
+        run: |
+          set -euo pipefail
+          workspace="$(find ios -maxdepth 1 -name '*.xcworkspace' | head -n 1)"
+          test -n "$workspace"
+          scheme="$(
+            xcodebuild -list -json -workspace "$workspace" |
+            python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["workspace"]["schemes"][0])'
+          )"
+          test -n "$scheme"
+          echo "workspace=$workspace"
+          echo "scheme=$scheme"
+          xcodebuild             -workspace "$workspace"             -scheme "$scheme"             -sdk iphonesimulator             -configuration Debug             CODE_SIGNING_ALLOWED=NO             build
+
+      - name: Record generated iOS metadata
+        working-directory: apps/mobile
+        run: |
+          set -euo pipefail
+          mkdir -p ../../ios-validation-evidence
+          xcodebuild -version > ../../ios-validation-evidence/XCODE_VERSION.txt
+          find ios -maxdepth 2 -type f \( -name 'Podfile.lock' -o -name 'project.pbxproj' \) -print             > ../../ios-validation-evidence/GENERATED_FILES.txt
+          git rev-parse HEAD > ../../ios-validation-evidence/SOURCE_COMMIT.txt
+
+      - name: Upload iOS validation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: kicks-ios-validation-${{ github.run_number }}
+          path: ios-validation-evidence/
+          if-no-files-found: error
+          retention-days: 14

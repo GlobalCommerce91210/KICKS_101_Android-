@@ -1,0 +1,30 @@
+{
+  "cli": {
+    "version": ">= 19.1.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "ios-simulator": {
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      }
+    },
+    "ios-device": {
+      "distribution": "internal",
+      "credentialsSource": "remote",
+      "autoIncrement": true,
+      "ios": {
+        "simulator": false
+      }
+    },
+    "ios-production": {
+      "distribution": "store",
+      "credentialsSource": "remote",
+      "autoIncrement": true,
+      "ios": {
+        "simulator": false
+      }
+    }
+  }
+}
