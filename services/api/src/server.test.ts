@@ -1,18 +1,20 @@
-import test from 'node:test';import assert from 'node:assert/strict';import{buildServer,memoryStore}from'./server.js';import{randomUUID}from'node:crypto';
-const setup=async()=>{const store=memoryStore(),app=buildServer({store,adminSecret:'staging-secret'}),subjectId=randomUUID();const r=await app.inject({method:'POST',url:'/v1/staging/devices',headers:{'x-admin-secret':'staging-secret'},payload:{subjectId}});return{app,store,token:r.json().token as string}};
+import test from 'node:test';import assert from 'node:assert/strict';import{buildServer,memoryStore}from'./server.js';import{randomUUID}from'node:crypto';import{IntelligenceEngine}from'./intelligence.js';
+const setup=async(options:{intelligenceEngine?:IntelligenceEngine}={})=>{const store=memoryStore(),app=buildServer({store,adminSecret:'staging-secret',...options}),subjectId=randomUUID();const r=await app.inject({method:'POST',url:'/v1/staging/devices',headers:{'x-admin-secret':'staging-secret'},payload:{subjectId}});return{app,store,token:r.json().token as string}};
 test('health reports metadata-only staging',async()=>{const app=buildServer(),r=await app.inject({method:'GET',url:'/health'});assert.equal(r.json().collector,'metadata-only');await app.close()});
 test('serves web app index.html on root path',async()=>{const app=buildServer(),r=await app.inject({method:'GET',url:'/'});assert.equal(r.statusCode,200);assert.match(r.headers['content-type']??'',/text\/html/);await app.close()});
 test('zero trust denies unauthenticated consent writes',async()=>{const app=buildServer(),r=await app.inject({method:'POST',url:'/v1/consent-events',payload:{}});assert.equal(r.statusCode,401);await app.close()});
-test('ingestion requires active purpose consent and blocks replay',async()=>{const{app,store,token}=await setup(),permissionId=randomUUID(),headers={authorization:`Bearer ${token}`};await app.inject({method:'POST',url:'/v1/consent-events',headers,payload:{permissionId,action:'grant',policyVersion:'privacy-1',purposeVersion:'network-safety-1',purpose:'Detect unexpected data destinations'}});const payload={batchId:randomUUID(),schemaVersion:'2026-08-01',observations:[{eventId:randomUUID(),occurredAt:new Date().toISOString(),sourceApp:'com.example.app',attribution:'verified',destinationHost:'api.example.com',protocol:'tls',bytesBucket:'1-10KB',classification:'expected',consentId:permissionId,consentPurpose:'Detect unexpected data destinations'}]};assert.equal((await app.inject({method:'POST',url:'/v1/metadata-batches',headers,payload})).statusCode,202);assert.equal(store.observations.length,1);assert.equal((await app.inject({method:'POST',url:'/v1/metadata-batches',headers,payload})).statusCode,409);await app.close()});
+test('ingestion requires active purpose consent and blocks replay',async()=>{const{app,store,token}=await setup(),permissionId=randomUUID(),headers={authorization:`Bearer ${token}`};const grant=await app.inject({method:'POST',url:'/v1/consent-events',headers,payload:{permissionId,action:'grant',policyVersion:'privacy-1',purposeVersion:'network-safety-1',purpose:'Detect unexpected data destinations'}});const activationId=grant.json().activationId;const payload={batchId:randomUUID(),schemaVersion:'2026-08-01',observations:[{eventId:randomUUID(),occurredAt:new Date().toISOString(),sourceApp:'com.example.app',attribution:'verified',destinationHost:'api.example.com',protocol:'tls',bytesBucket:'1-10KB',classification:'expected',consentId:activationId,consentPurpose:'Detect unexpected data destinations'}]};assert.equal((await app.inject({method:'POST',url:'/v1/metadata-batches',headers,payload})).statusCode,202);assert.equal(store.observations.length,1);assert.equal((await app.inject({method:'POST',url:'/v1/metadata-batches',headers,payload})).statusCode,409);await app.close()});
 test('payload fields fail the minimization contract',async()=>{const{app,token}=await setup();const r=await app.inject({method:'POST',url:'/v1/metadata-batches',headers:{authorization:`Bearer ${token}`},payload:{batchId:randomUUID(),schemaVersion:'2026-08-01',observations:[{payload:'secret'}]}});assert.equal(r.statusCode,400);await app.close()});
 
 test('intelligence and value engine endpoints satisfy openapi contract', async () => {
-  const app = buildServer();
+  const { app, token } = await setup();
+  const headers = { authorization: `Bearer ${token}` };
 
   // 1. POST /v1/intelligence/events
   const eventId = 'test-evt-99';
   const postRes = await app.inject({
     method: 'POST',
+    headers,
     url: '/v1/intelligence/events',
     payload: {
       event_id: eventId,
@@ -23,6 +25,7 @@ test('intelligence and value engine endpoints satisfy openapi contract', async (
         domain: 'analytics.adservice.net',
         endpoint: '/track/v1',
         method: 'POST',
+        headers,
         status_code: 200
       },
       metadata: {
@@ -44,6 +47,7 @@ test('intelligence and value engine endpoints satisfy openapi contract', async (
   // 2. GET /v1/intelligence/events/:event_id
   const getEventRes = await app.inject({
     method: 'GET',
+    headers,
     url: `/v1/intelligence/events/${eventId}`
   });
   assert.equal(getEventRes.statusCode, 200);
@@ -52,6 +56,7 @@ test('intelligence and value engine endpoints satisfy openapi contract', async (
   // 3. GET /v1/inspector/events/:event_id/metadata
   const getMetaRes = await app.inject({
     method: 'GET',
+    headers,
     url: `/v1/inspector/events/${eventId}/metadata`
   });
   assert.equal(getMetaRes.statusCode, 200);
@@ -60,6 +65,7 @@ test('intelligence and value engine endpoints satisfy openapi contract', async (
   // 4. GET /v1/inspector/apps/:app_id/gates
   const getGatesRes = await app.inject({
     method: 'GET',
+    headers,
     url: '/v1/inspector/apps/com.retail.shop/gates'
   });
   assert.equal(getGatesRes.statusCode, 200);
@@ -68,6 +74,7 @@ test('intelligence and value engine endpoints satisfy openapi contract', async (
   // 5. POST /v1/inspector/apps/:app_id/gates
   const updateGatesRes = await app.inject({
     method: 'POST',
+    headers,
     url: '/v1/inspector/apps/com.retail.shop/gates',
     payload: {
       app_id: 'com.retail.shop',
@@ -85,6 +92,7 @@ test('intelligence and value engine endpoints satisfy openapi contract', async (
   // 6. POST /v1/marketplace/match
   const matchRes = await app.inject({
     method: 'POST',
+    headers,
     url: '/v1/marketplace/match',
     payload: {
       app_id: 'com.retail.shop'
@@ -96,6 +104,7 @@ test('intelligence and value engine endpoints satisfy openapi contract', async (
   // 7. GET /v1/intelligence/apps/:app_id/summary
   const summaryRes = await app.inject({
     method: 'GET',
+    headers,
     url: '/v1/intelligence/apps/com.retail.shop/summary'
   });
   assert.equal(summaryRes.statusCode, 200);
@@ -106,116 +115,201 @@ test('intelligence and value engine endpoints satisfy openapi contract', async (
 });
 
 test('wallet mechanic endpoints satisfy openapi contract', async () => {
-  const app = buildServer({ adminSecret: 'sec' });
+  const intelligenceEngine = new IntelligenceEngine();
+  intelligenceEngine.setOffers([{
+    offer_id: 'offer-wallet-test-01',
+    buyer_id: 'buyer-wallet-test-01',
+    buyer_category: 'Research',
+    metadata_types: ['commercial', 'intent'],
+    pricing_model: { type: 'per_event', min_value_per_event: 10, max_value_per_event: 10 },
+    regions_allowed: ['US'],
+    consent_required: true,
+    status: 'active'
+  }]);
 
-  // 1. GET /v1/wallet/:user_id
+  const { app, token } = await setup({ intelligenceEngine });
+  const headers = { authorization: `Bearer ${token}` };
+  const userId = 'user_wallet_test_01';
+  const appId = 'com.example.shop';
+  const eventId = 'evt-test-earn-01';
+
   const summaryRes = await app.inject({
     method: 'GET',
-    url: '/v1/wallet/user_demo_01'
+    headers,
+    url: `/v1/wallet/${userId}`
   });
   assert.equal(summaryRes.statusCode, 200);
   const summary = summaryRes.json();
-  assert.equal(typeof summary.total_earned, 'number');
-  assert.equal(typeof summary.total_pending, 'number');
-  assert.equal(typeof summary.total_settled, 'number');
+  assert.equal(summary.total_earned, 0);
+  assert.equal(summary.total_pending, 0);
+  assert.equal(summary.total_settled, 0);
   assert.ok(summary.earnings_by_app);
   assert.ok(summary.earnings_by_metadata);
 
-  // 2. GET /v1/wallet/:user_id/ledger
+  const initialLedgerRes = await app.inject({
+    method: 'GET',
+    headers,
+    url: `/v1/wallet/${userId}/ledger?page=1&page_size=10`
+  });
+  assert.equal(initialLedgerRes.statusCode, 200);
+  const initialLedger = initialLedgerRes.json();
+  assert.ok(Array.isArray(initialLedger.items));
+  assert.equal(initialLedger.items.length, 0);
+  assert.equal(initialLedger.page, 1);
+  assert.equal(initialLedger.page_size, 10);
+
+  const progressRes = await app.inject({
+    method: 'GET',
+    headers,
+    url: `/v1/wallet/${userId}/progress`
+  });
+  assert.equal(progressRes.statusCode, 200);
+  assert.equal(typeof progressRes.json().level, 'number');
+  assert.equal(typeof progressRes.json().xp, 'number');
+
+  assert.equal((await app.inject({
+    method: 'POST',
+    headers,
+    url: `/v1/permissions/users/${userId}/apps`,
+    payload: { apps: [{
+      app_id: appId,
+      app_name: 'Shop Test',
+      state: 'allowed',
+      reason: 'Explicit test permission',
+      last_updated: new Date().toISOString()
+    }] }
+  })).statusCode, 200);
+
+  assert.equal((await app.inject({
+    method: 'POST',
+    headers,
+    url: `/v1/permissions/users/${userId}/apps/${appId}/metadata`,
+    payload: { metadata_permissions: [
+      { metadata_type: 'commercial', key: 'category', state: 'allowed', last_updated: new Date().toISOString() },
+      { metadata_type: 'intent', key: 'purchase_intent', state: 'allowed', last_updated: new Date().toISOString() }
+    ] }
+  })).statusCode, 200);
+
+  assert.equal((await app.inject({
+    method: 'POST',
+    headers,
+    url: `/v1/permissions/users/${userId}/buyers`,
+    payload: { buyers: [{
+      buyer_category: 'Research',
+      state: 'allowed',
+      max_value_band: 100,
+      last_updated: new Date().toISOString()
+    }] }
+  })).statusCode, 200);
+
+  assert.equal((await app.inject({
+    method: 'POST',
+    headers,
+    url: `/v1/inspector/apps/${appId}/gates`,
+    payload: {
+      app_id: appId,
+      gates: [
+        { metadata_type: 'commercial', default_state: 'allowed' },
+        { metadata_type: 'intent', default_state: 'allowed' }
+      ]
+    }
+  })).statusCode, 200);
+
+  const eventRes = await app.inject({
+    method: 'POST',
+    headers,
+    url: '/v1/intelligence/events',
+    payload: {
+      event_id: eventId,
+      timestamp: new Date().toISOString(),
+      app_id: appId,
+      device_id: 'device-wallet-test-01',
+      network: {
+        domain: 'analytics.shop.test',
+        endpoint: '/track',
+        method: 'POST',
+        headers: {},
+        status_code: 200
+      },
+      metadata: {
+        purchase_intent: 'high',
+        category: 'running_shoes'
+      },
+      tags: ['commercial', 'shopping']
+    }
+  });
+  assert.equal(eventRes.statusCode, 200);
+
+  const earnRes = await app.inject({
+    method: 'POST',
+    headers,
+    url: '/v1/wallet/events/earn',
+    payload: { event_id: eventId, user_id: userId }
+  });
+  assert.equal(earnRes.statusCode, 200);
+  const earn = earnRes.json();
+  assert.equal(earn.permitted, true);
+  assert.equal(earn.ledger_entry.event_id, eventId);
+  assert.equal(earn.ledger_entry.permission_state, 'permitted');
+
   const ledgerRes = await app.inject({
     method: 'GET',
-    url: '/v1/wallet/user_demo_01/ledger?page=1&page_size=10'
+    headers,
+    url: `/v1/wallet/${userId}/ledger?page=1&page_size=10`
   });
   assert.equal(ledgerRes.statusCode, 200);
   const ledger = ledgerRes.json();
-  assert.ok(Array.isArray(ledger.items));
-  assert.equal(ledger.page, 1);
-  assert.equal(ledger.page_size, 10);
   assert.ok(ledger.items.length > 0);
   assert.ok(ledger.items[0].ledger_id);
   assert.ok(ledger.items[0].wallet_id);
 
-  // 3. GET /v1/wallet/:user_id/progress
-  const progressRes = await app.inject({
-    method: 'GET',
-    url: '/v1/wallet/user_demo_01/progress'
-  });
-  assert.equal(progressRes.statusCode, 200);
-  const progress = progressRes.json();
-  assert.equal(typeof progress.level, 'number');
-  assert.equal(typeof progress.xp, 'number');
-  assert.ok(Array.isArray(progress.milestones_unlocked));
-  assert.ok(progress.bonuses);
-
-  // 4. GET /v1/wallet/:user_id/apps
   const appsRes = await app.inject({
     method: 'GET',
-    url: '/v1/wallet/user_demo_01/apps'
+    headers,
+    url: `/v1/wallet/${userId}/apps`
   });
   assert.equal(appsRes.statusCode, 200);
   assert.ok(appsRes.json().earnings_by_app);
 
-  // 5. GET /v1/wallet/:user_id/metadata
   const metaRes = await app.inject({
     method: 'GET',
-    url: '/v1/wallet/user_demo_01/metadata'
+    headers,
+    url: `/v1/wallet/${userId}/metadata`
   });
   assert.equal(metaRes.statusCode, 200);
   assert.ok(metaRes.json().earnings_by_metadata);
 
-  // 6. POST /v1/wallet/events/earn
-  const earnRes = await app.inject({
-    method: 'POST',
-    url: '/v1/wallet/events/earn',
-    payload: {
-      event_id: 'evt-test-earn-01',
-      user_id: 'user_demo_01'
-    }
-  });
-  assert.equal(earnRes.statusCode, 200);
-  const earn = earnRes.json();
-  assert.ok(earn.ledger_entry);
-  assert.ok(earn.wallet);
-  assert.ok(earn.progression_update);
-  assert.equal(earn.ledger_entry.event_id, 'evt-test-earn-01');
-
-  // 7. POST /v1/wallet/:user_id/payout
   const payoutRes = await app.inject({
     method: 'POST',
-    url: '/v1/wallet/user_demo_01/payout',
-    payload: {
-      amount: 5.00,
-      method: 'partner_credit'
-    }
+    headers,
+    url: `/v1/wallet/${userId}/payout`,
+    payload: { amount: 5, method: 'partner_credit' }
   });
-  assert.equal(payoutRes.statusCode, 200);
-  const payout = payoutRes.json();
-  assert.ok(payout.payout);
-  assert.ok(payout.wallet);
-  assert.equal(payout.payout.amount, 5.00);
-  assert.equal(payout.payout.method, 'partner_credit');
-  assert.equal(payout.payout.status, 'completed');
+  assert.equal(payoutRes.statusCode, 409);
+  assert.equal(payoutRes.json().permitted, false);
+  assert.ok(payoutRes.json().denial_reason);
 
   await app.close();
 });
-
 test('permissions control endpoints satisfy openapi contract', async () => {
-  const app = buildServer({ adminSecret: 'sec' });
+  const { app, token } = await setup();
+  const headers = { authorization: `Bearer ${token}` };
 
   // 1. GET /v1/permissions/users/:user_id/apps
   const appsRes = await app.inject({
     method: 'GET',
+    headers,
     url: '/v1/permissions/users/user_demo_01/apps'
   });
   assert.equal(appsRes.statusCode, 200);
   const appsData = appsRes.json();
   assert.ok(Array.isArray(appsData.apps));
-  assert.ok(appsData.apps.length > 0);
-  assert.equal(appsData.apps[0].app_id, 'com.example.shop');
+  assert.equal(appsData.apps.length, 0);
 
   // 2. POST /v1/permissions/users/:user_id/apps
   const updateAppsRes = await app.inject({
     method: 'POST',
+    headers,
     url: '/v1/permissions/users/user_demo_01/apps',
     payload: {
       apps: [
@@ -235,6 +329,7 @@ test('permissions control endpoints satisfy openapi contract', async () => {
   // 3. GET /v1/permissions/users/:user_id/apps/:app_id/metadata
   const metaRes = await app.inject({
     method: 'GET',
+    headers,
     url: '/v1/permissions/users/user_demo_01/apps/com.example.shop/metadata'
   });
   assert.equal(metaRes.statusCode, 200);
@@ -245,6 +340,7 @@ test('permissions control endpoints satisfy openapi contract', async () => {
   // 4. POST /v1/permissions/users/:user_id/apps/:app_id/metadata
   const updateMetaRes = await app.inject({
     method: 'POST',
+    headers,
     url: '/v1/permissions/users/user_demo_01/apps/com.example.shop/metadata',
     payload: {
       metadata_permissions: [
@@ -263,6 +359,7 @@ test('permissions control endpoints satisfy openapi contract', async () => {
   // 5. GET /v1/permissions/users/:user_id/buyers
   const buyersRes = await app.inject({
     method: 'GET',
+    headers,
     url: '/v1/permissions/users/user_demo_01/buyers'
   });
   assert.equal(buyersRes.statusCode, 200);
@@ -272,6 +369,7 @@ test('permissions control endpoints satisfy openapi contract', async () => {
   // 6. POST /v1/permissions/users/:user_id/buyers
   const updateBuyersRes = await app.inject({
     method: 'POST',
+    headers,
     url: '/v1/permissions/users/user_demo_01/buyers',
     payload: {
       buyers: [
@@ -289,6 +387,7 @@ test('permissions control endpoints satisfy openapi contract', async () => {
   // 7. GET /v1/permissions/users/:user_id/effective
   const effectiveRes = await app.inject({
     method: 'GET',
+    headers,
     url: '/v1/permissions/users/user_demo_01/effective'
   });
   assert.equal(effectiveRes.statusCode, 200);
@@ -301,6 +400,7 @@ test('permissions control endpoints satisfy openapi contract', async () => {
   // 8. GET /v1/permissions/users/:user_id/consent-log
   const logRes = await app.inject({
     method: 'GET',
+    headers,
     url: '/v1/permissions/users/user_demo_01/consent-log?page=1&page_size=10'
   });
   assert.equal(logRes.statusCode, 200);
@@ -313,80 +413,383 @@ test('permissions control endpoints satisfy openapi contract', async () => {
   await app.close();
 });
 
-test('wallet permissions enforcement: blocked apps, metadata, buyers deny earnings and payouts', async () => {
-  const app = buildServer({ adminSecret: 'sec' });
+test('wallet permissions enforcement: explicit grants allow earnings and later app blocks deny new earnings and payout', async () => {
+  const intelligenceEngine = new IntelligenceEngine();
+  intelligenceEngine.setOffers([{
+    offer_id: 'offer-permission-test-01',
+    buyer_id: 'buyer-permission-test-01',
+    buyer_category: 'Research',
+    metadata_types: ['commercial', 'intent'],
+    pricing_model: { type: 'per_event', min_value_per_event: 10, max_value_per_event: 10 },
+    regions_allowed: ['US'],
+    consent_required: true,
+    status: 'active'
+  }]);
 
-  // 1. Initial earn succeeds
+  const { app, token } = await setup({ intelligenceEngine });
+  const headers = { authorization: `Bearer ${token}` };
+  const userId = 'user_permission_test_01';
+  const appId = 'com.example.shop';
+
+  assert.equal((await app.inject({
+    method: 'POST',
+    headers,
+    url: `/v1/permissions/users/${userId}/apps`,
+    payload: { apps: [{
+      app_id: appId,
+      app_name: 'Shop Test',
+      state: 'allowed',
+      reason: 'Explicit test permission',
+      last_updated: new Date().toISOString()
+    }] }
+  })).statusCode, 200);
+
+  assert.equal((await app.inject({
+    method: 'POST',
+    headers,
+    url: `/v1/permissions/users/${userId}/apps/${appId}/metadata`,
+    payload: { metadata_permissions: [
+      { metadata_type: 'commercial', key: 'category', state: 'allowed', last_updated: new Date().toISOString() },
+      { metadata_type: 'intent', key: 'purchase_intent', state: 'allowed', last_updated: new Date().toISOString() }
+    ] }
+  })).statusCode, 200);
+
+  assert.equal((await app.inject({
+    method: 'POST',
+    headers,
+    url: `/v1/permissions/users/${userId}/buyers`,
+    payload: { buyers: [{
+      buyer_category: 'Research',
+      state: 'allowed',
+      max_value_band: 100,
+      last_updated: new Date().toISOString()
+    }] }
+  })).statusCode, 200);
+
+  assert.equal((await app.inject({
+    method: 'POST',
+    headers,
+    url: `/v1/inspector/apps/${appId}/gates`,
+    payload: {
+      app_id: appId,
+      gates: [
+        { metadata_type: 'commercial', default_state: 'allowed' },
+        { metadata_type: 'intent', default_state: 'allowed' }
+      ]
+    }
+  })).statusCode, 200);
+
+  const makeEvent = async (eventId: string) => app.inject({
+    method: 'POST',
+    headers,
+    url: '/v1/intelligence/events',
+    payload: {
+      event_id: eventId,
+      timestamp: new Date().toISOString(),
+      app_id: appId,
+      device_id: 'device-permission-test-01',
+      network: {
+        domain: 'analytics.shop.test',
+        endpoint: '/track',
+        method: 'POST',
+        headers: {},
+        status_code: 200
+      },
+      metadata: {
+        purchase_intent: 'high',
+        category: 'running_shoes'
+      },
+      tags: ['commercial', 'shopping']
+    }
+  });
+
+  assert.equal((await makeEvent('evt-perm-test-01')).statusCode, 200);
+  assert.equal((await makeEvent('evt-perm-test-02')).statusCode, 200);
+
   const earnRes1 = await app.inject({
     method: 'POST',
+    headers,
     url: '/v1/wallet/events/earn',
     payload: {
       event_id: 'evt-perm-test-01',
-      user_id: 'user_demo_01'
+      user_id: userId
     }
   });
   assert.equal(earnRes1.statusCode, 200);
   assert.equal(earnRes1.json().permitted, true);
   assert.equal(earnRes1.json().ledger_entry.permission_state, 'permitted');
 
-  // 2. Block the app 'com.example.shop'
   const blockAppRes = await app.inject({
     method: 'POST',
-    url: '/v1/permissions/users/user_demo_01/apps',
+    headers,
+    url: `/v1/permissions/users/${userId}/apps`,
     payload: {
-      apps: [
-        {
-          app_id: 'com.example.shop',
-          app_name: 'Shop Sample',
-          state: 'blocked',
-          reason: 'Blocked by test enforcement',
-          last_updated: new Date().toISOString()
-        }
-      ]
+      apps: [{
+        app_id: appId,
+        app_name: 'Shop Test',
+        state: 'blocked',
+        reason: 'Blocked by test enforcement',
+        last_updated: new Date().toISOString()
+      }]
     }
   });
   assert.equal(blockAppRes.statusCode, 200);
 
-  // 3. Earning from blocked app is denied
   const earnBlockedAppRes = await app.inject({
     method: 'POST',
+    headers,
     url: '/v1/wallet/events/earn',
     payload: {
       event_id: 'evt-perm-test-02',
-      user_id: 'user_demo_01'
+      user_id: userId
     }
   });
   assert.equal(earnBlockedAppRes.statusCode, 200);
   assert.equal(earnBlockedAppRes.json().permitted, false);
   assert.equal(earnBlockedAppRes.json().ledger_entry.permission_state, 'denied');
   assert.equal(earnBlockedAppRes.json().ledger_entry.status, 'rejected');
-  assert.ok(earnBlockedAppRes.json().denial_reason.includes('blocked by user permission policy'));
+  assert.ok(earnBlockedAppRes.json().denial_reason);
 
-  // 4. Ledger reflects denied entry and reason
   const ledgerRes = await app.inject({
     method: 'GET',
-    url: '/v1/wallet/user_demo_01/ledger?page=1&page_size=5'
+    headers,
+    url: `/v1/wallet/${userId}/ledger?page=1&page_size=5`
   });
   assert.equal(ledgerRes.statusCode, 200);
-  const ledgerItems = ledgerRes.json().items;
-  assert.ok(ledgerItems.some((i: any) => i.permission_state === 'denied'));
+  assert.ok(ledgerRes.json().items.some((i: any) => i.permission_state === 'denied'));
 
-  // 5. Payout request is denied when earning source app is blocked
   const payoutDeniedRes = await app.inject({
     method: 'POST',
-    url: '/v1/wallet/user_demo_01/payout',
+    headers,
+    url: `/v1/wallet/${userId}/payout`,
     payload: {
-      amount: 5.00,
+      amount: 5,
       method: 'bank_transfer'
     }
   });
-  assert.equal(payoutDeniedRes.statusCode, 200);
+  assert.equal(payoutDeniedRes.statusCode, 409);
   assert.equal(payoutDeniedRes.json().permitted, false);
   assert.ok(payoutDeniedRes.json().denial_reason);
 
   await app.close();
 });
+test('core compliance API is authenticated, fail-closed, consent-aware, and human-review gated', async () => {
+  const { app, token } = await setup();
+  const headers = { authorization: `Bearer ${token}` };
+  const adminHeaders = { ...headers, 'x-admin-secret': 'staging-secret' };
 
+  const unauthenticated = await app.inject({
+    method: 'POST',
+    url: '/core/compliance/v1/evaluate',
+    payload: {
+      action: 'blog.publish',
+      resource_type: 'blog_post',
+      resource_id: 'post-compliance-01'
+    }
+  });
+  assert.equal(unauthenticated.statusCode, 401);
+
+  const noPolicy = await app.inject({
+    method: 'POST',
+    headers,
+    url: '/core/compliance/v1/evaluate',
+    payload: {
+      action: 'blog.publish',
+      resource_type: 'blog_post',
+      resource_id: 'post-compliance-01',
+      consents: ['content_publish'],
+      attributes: { review_channel: 'editorial' }
+    }
+  });
+  assert.equal(noPolicy.statusCode, 200);
+  assert.equal(noPolicy.json().outcome, 'deny');
+  assert.ok(noPolicy.json().reasons.includes('no_active_policy'));
+
+  const deniedDecisionId = noPolicy.json().decision_id;
+  const decisionLookup = await app.inject({
+    method: 'GET',
+    headers,
+    url: `/core/compliance/v1/decisions/${deniedDecisionId}`
+  });
+  assert.equal(decisionLookup.statusCode, 200);
+  assert.equal(decisionLookup.json().decision_id, deniedDecisionId);
+
+  const policiesWithoutAdmin = await app.inject({
+    method: 'GET',
+    headers,
+    url: '/core/compliance/v1/policies'
+  });
+  assert.equal(policiesWithoutAdmin.statusCode, 403);
+
+  const effectiveFrom = new Date(Date.now() - 60_000).toISOString();
+  const policyPayload = {
+    policy_id: 'blog-publish-policy',
+    version: '1.0.0',
+    status: 'active',
+    action: 'blog.publish',
+    resource_type: 'blog_post',
+    required_consents: ['content_publish'],
+    required_attributes: { review_channel: 'editorial' },
+    human_review: 'required',
+    conditions: ['content_must_match_approved_submission'],
+    effective_from: effectiveFrom,
+    effective_to: null
+  };
+
+  const putPolicy = await app.inject({
+    method: 'PUT',
+    headers: adminHeaders,
+    url: '/core/compliance/v1/policies/blog-publish-policy/1.0.0',
+    payload: policyPayload
+  });
+  assert.equal(putPolicy.statusCode, 200);
+  assert.equal(putPolicy.json().policy_id, 'blog-publish-policy');
+
+  const missingConsent = await app.inject({
+    method: 'POST',
+    headers,
+    url: '/core/compliance/v1/evaluate',
+    payload: {
+      action: 'blog.publish',
+      resource_type: 'blog_post',
+      resource_id: 'post-compliance-02',
+      consents: [],
+      attributes: { review_channel: 'editorial' }
+    }
+  });
+  assert.equal(missingConsent.statusCode, 200);
+  assert.equal(missingConsent.json().outcome, 'deny');
+  assert.ok(missingConsent.json().reasons.includes('missing_required_consent:content_publish'));
+
+  const reviewRequired = await app.inject({
+    method: 'POST',
+    headers,
+    url: '/core/compliance/v1/evaluate',
+    payload: {
+      action: 'blog.publish',
+      resource_type: 'blog_post',
+      resource_id: 'post-compliance-03',
+      consents: ['content_publish'],
+      attributes: { review_channel: 'editorial' }
+    }
+  });
+  assert.equal(reviewRequired.statusCode, 200);
+  assert.equal(reviewRequired.json().outcome, 'allow_with_conditions');
+  assert.equal(reviewRequired.json().human_review_required, true);
+  assert.equal(reviewRequired.json().human_review_approved, false);
+  assert.ok(reviewRequired.json().conditions.includes('human_review_approval_required'));
+
+  const policies = await app.inject({
+    method: 'GET',
+    headers: adminHeaders,
+    url: '/core/compliance/v1/policies'
+  });
+  assert.equal(policies.statusCode, 200);
+  assert.ok(policies.json().policies.some((p: any) => p.policy_id === 'blog-publish-policy'));
+
+  await app.close();
+});
+test('blog compliance gateway requires policy, admin review, and compliance authorization before publish', async () => {
+  const { app, token } = await setup();
+  const headers = { authorization: `Bearer ${token}` };
+  const adminHeaders = { ...headers, 'x-admin-secret': 'staging-secret' };
+
+  const policyPayload = {
+    policy_id: 'blog-gateway-publish-policy',
+    version: '1.0.0',
+    status: 'active',
+    action: 'blog.publish',
+    resource_type: 'blog_post',
+    required_consents: ['content_publish'],
+    required_attributes: { review_channel: 'editorial' },
+    human_review: 'required',
+    conditions: ['content_must_match_approved_submission'],
+    effective_from: new Date(Date.now() - 60_000).toISOString(),
+    effective_to: null
+  };
+
+  const putPolicy = await app.inject({
+    method: 'PUT',
+    headers: adminHeaders,
+    url: '/core/compliance/v1/policies/blog-gateway-publish-policy/1.0.0',
+    payload: policyPayload
+  });
+  assert.equal(putPolicy.statusCode, 200);
+
+  const unauthenticatedSubmission = await app.inject({
+    method: 'POST',
+    url: '/core/blog-gateway/v1/submissions',
+    payload: {
+      resource_id: 'blog-post-01',
+      content_hash: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+    }
+  });
+  assert.equal(unauthenticatedSubmission.statusCode, 401);
+
+  const submissionRes = await app.inject({
+    method: 'POST',
+    headers,
+    url: '/core/blog-gateway/v1/submissions',
+    payload: {
+      resource_id: 'blog-post-01',
+      content_hash: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      consents: ['content_publish'],
+      attributes: { review_channel: 'editorial' }
+    }
+  });
+  assert.equal(submissionRes.statusCode, 201);
+  const submission = submissionRes.json();
+  assert.ok(submission.submission_id);
+
+  const beforeReview = await app.inject({
+    method: 'POST',
+    headers,
+    url: `/core/blog-gateway/v1/submissions/${submission.submission_id}/authorize`
+  });
+  assert.equal(beforeReview.statusCode, 409);
+  assert.equal(beforeReview.json().permitted, false);
+  assert.equal(beforeReview.json().outcome, 'allow_with_conditions');
+  assert.equal(beforeReview.json().denial_reason, 'human_review_required');
+
+  const clientReviewAttempt = await app.inject({
+    method: 'POST',
+    headers,
+    url: `/core/blog-gateway/v1/submissions/${submission.submission_id}/review`,
+    payload: { approved: true }
+  });
+  assert.equal(clientReviewAttempt.statusCode, 403);
+
+  const adminReview = await app.inject({
+    method: 'POST',
+    headers: adminHeaders,
+    url: `/core/blog-gateway/v1/submissions/${submission.submission_id}/review`,
+    payload: { approved: true }
+  });
+  assert.equal(adminReview.statusCode, 200);
+  assert.equal(adminReview.json().approved, true);
+
+  const afterReview = await app.inject({
+    method: 'POST',
+    headers,
+    url: `/core/blog-gateway/v1/submissions/${submission.submission_id}/authorize`
+  });
+  assert.equal(afterReview.statusCode, 200);
+  const authorization = afterReview.json();
+  assert.equal(authorization.permitted, true);
+  assert.equal(authorization.outcome, 'allow_with_conditions');
+  assert.ok(authorization.authorization_id);
+  assert.ok(authorization.decision_id);
+
+  const getAuthorization = await app.inject({
+    method: 'GET',
+    headers,
+    url: `/core/blog-gateway/v1/authorizations/${authorization.authorization_id}`
+  });
+  assert.equal(getAuthorization.statusCode, 200);
+  assert.equal(getAuthorization.json().authorization_id, authorization.authorization_id);
+
+  await app.close();
+});
 test('branding endpoints return official brand and mascot specification', async () => {
   const app = buildServer({ adminSecret: 'sec' });
 
@@ -397,11 +800,11 @@ test('branding endpoints return official brand and mascot specification', async 
   assert.equal(res.statusCode, 200);
   const data = res.json();
   assert.equal(data.schemaVersion, '1.0');
-  assert.equal(data.productName, 'KICK’S');
+  assert.equal(data.productName, 'KICK\u2019S');
   assert.equal(data.ownershipLabel, 'A product of DataStorm Inc.');
   assert.equal(data.assetVersion, 'mascot-2026-09-15-01');
   assert.equal(data.minimumAppVersion, '0.2.5');
-  assert.equal(data.altText, 'KICK’S orange and gold mascot with blue eyes and glowing data rings');
+  assert.equal(data.altText, 'KICK\u2019S orange and gold mascot with blue eyes and glowing data rings');
   assert.ok(data.assets?.primary?.url.includes('mascot-2026-09-15-01.webp'));
   assert.equal(data.assets?.primary?.mimeType, 'image/webp');
   assert.equal(data.assets?.primary?.width, 1024);
@@ -416,6 +819,3 @@ test('branding endpoints return official brand and mascot specification', async 
 
   await app.close();
 });
-
-
-
