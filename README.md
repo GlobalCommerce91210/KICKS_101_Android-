@@ -85,7 +85,7 @@ The Expo workspace upgrade branch is **0.2.6**. Android uses `versionName "0.2.6
 
 ---
 
-KICK'S is the official DataStorm Inc. privacy and data-value product and app, formerly known as Kickback's. This standalone application is derived from validated concepts in the existing Base44 beta. The Base44 application remains untouched and is not the production control plane.
+KICK’S is the official product and DBA of DataStorm Inc., the legal entity. KICK’S is a mobile privacy and data-value application. This standalone application is derived from validated concepts in the existing Base44 beta. The Base44 application remains untouched and is not the production control plane.
 
 The current KICK'S visual layout is the product-owner-approved baseline. See `docs/DESIGN_BASELINE.md`. The fast-track production collector and Android beta gates are defined in `docs/ANDROID_BETA_LAUNCH_PLAN.md`.
 
