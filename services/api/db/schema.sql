@@ -37,3 +37,36 @@ CREATE TABLE devices (
   environment text NOT NULL CHECK (environment IN ('staging','production')),
   revoked_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- M2 DataStorm master consumer identity. This is deliberately separate from
+-- KICK'S collector consent/device state so account creation grants no monitoring,
+-- commercial, marketplace, or metadata-collection permission.
+CREATE TABLE IF NOT EXISTS consumer_accounts (
+  subject_id uuid PRIMARY KEY,
+  email text NOT NULL UNIQUE,
+  password_hash text NOT NULL,
+  status text NOT NULL CHECK (status IN ('pending_verification','active','suspended','closed')),
+  email_verified_at timestamptz,
+  mfa_enabled boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  closed_at timestamptz
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS consumer_accounts_email_normalized_idx
+  ON consumer_accounts (lower(email));
+
+CREATE TABLE IF NOT EXISTS identity_tokens (
+  id uuid PRIMARY KEY,
+  subject_id uuid NOT NULL REFERENCES consumer_accounts(subject_id),
+  kind text NOT NULL CHECK (kind IN ('email_verification','password_reset','refresh','mfa')),
+  token_hash text NOT NULL UNIQUE,
+  expires_at timestamptz NOT NULL,
+  consumed_at timestamptz,
+  revoked_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS identity_tokens_subject_kind_idx
+  ON identity_tokens (subject_id, kind);
+REVOKE UPDATE, DELETE ON consumer_accounts, identity_tokens FROM PUBLIC;
