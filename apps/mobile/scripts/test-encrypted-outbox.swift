@@ -71,11 +71,11 @@ import Darwin
         }
         let parallelEntries = try await first.pending()
         precondition(parallelEntries.count == 32 && Set(parallelEntries.map { $0.batchId }).count == 32)
-        let descriptor = Darwin.open(parallelFile.path + ".lock",O_RDWR)
-        precondition(descriptor >= 0 && Darwin.flock(descriptor,LOCK_EX | LOCK_NB) == 0)
+        let descriptor = Darwin.open(parallelFile.path + ".lock",O_RDWR | O_EXLOCK | O_NONBLOCK)
+        precondition(descriptor >= 0)
         let busy = await second.diagnostics()
         precondition(busy.state == "storage_busy")
-        Darwin.flock(descriptor,LOCK_UN); Darwin.close(descriptor)
+        Darwin.close(descriptor)
         for _ in 32..<128 {
             let id=UUID().uuidString
             let data=try JSONSerialization.data(withJSONObject:["batchId":id,"observations":[["consentId":scope.activationId]]],options:[.sortedKeys])
@@ -86,6 +86,13 @@ import Darwin
         let extra=try JSONSerialization.data(withJSONObject:["batchId":extraId,"observations":[["consentId":scope.activationId]]],options:[.sortedKeys])
         try await rejects { try await second.enqueue(batchId:extraId,canonicalPayload:extra) }
         precondition(tryData(parallelFile) == atCapacity)
+        let linkedFile=directory.appendingPathComponent("linked.enc")
+        let missingTarget=directory.appendingPathComponent("missing.enc").path
+        try FileManager.default.createSymbolicLink(atPath:linkedFile.path,withDestinationPath:missingTarget)
+        let linked=try EncryptedObservationOutbox(file:linkedFile,key:key,scope:scope)
+        try await rejects { _ = try await linked.pending() }
+        let preservedLink=try FileManager.default.destinationOfSymbolicLink(atPath:linkedFile.path)
+        precondition(preservedLink == missingTarget)
         print("Encrypted outbox: restart, retry, receipt, isolation, retention, tamper, capacity, concurrent writers and safe diagnostics passed.")
     }
     static func tryData(_ file: URL) -> Data { try! Data(contentsOf:file) }

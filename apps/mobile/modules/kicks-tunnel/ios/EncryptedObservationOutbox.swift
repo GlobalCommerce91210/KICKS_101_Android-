@@ -43,11 +43,12 @@ actor EncryptedObservationOutbox {
     // A Swift actor serializes one instance only. The lock file also serializes
     // separate instances/processes, preventing a stale read from replacing data.
     private func withLock<T>(_ operation: () throws -> T) throws -> T {
-        let descriptor = Darwin.open(file.path + ".lock", O_RDWR | O_CREAT | O_NOFOLLOW, S_IRUSR | S_IWUSR)
-        guard descriptor >= 0 else { throw Failure.storageUnavailable }
+        let descriptor = Darwin.open(file.path + ".lock", O_RDWR | O_CREAT | O_NOFOLLOW | O_EXLOCK | O_NONBLOCK, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else {
+            if errno == EAGAIN || errno == EWOULDBLOCK { throw Failure.storageBusy }
+            throw Failure.storageUnavailable
+        }
         defer { Darwin.close(descriptor) }
-        guard Darwin.flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { throw Failure.storageBusy }
-        defer { Darwin.flock(descriptor, LOCK_UN) }
         return try operation()
     }
     private func context() throws -> Data {
@@ -55,6 +56,7 @@ actor EncryptedObservationOutbox {
         return try encoder.encode(scope)
     }
     private func load() throws -> Archive {
+        if (try? FileManager.default.destinationOfSymbolicLink(atPath: file.path)) != nil { throw Failure.corruptArchive }
         if !FileManager.default.fileExists(atPath: file.path) { return Archive(scope: scope, entries: []) }
         let metadata = try file.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
         guard metadata.isRegularFile == true, metadata.isSymbolicLink != true,
