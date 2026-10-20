@@ -16,6 +16,7 @@ export default function MyDevices() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [collectionBusy, setCollectionBusy] = useState(false);
+  const [connectedDevice, setConnectedDevice] = useState<{ subjectId: string; deviceId: string } | null>(null);
   const flight = useRef(false);
   const generation = useRef(0);
   const native = selectIosNativeAdapter(Platform.OS,
@@ -48,13 +49,18 @@ export default function MyDevices() {
   return <Screen>
     <BrandHeader section="My Devices" />
     <Text style={ui.title}>My Devices</Text>
-    <Text style={ui.body}>Your DataStorm account, this device, and its collector have separate identities. Enrollment alone does not start collection.</Text>
+    <Text style={ui.body}>Start by connecting this iPad to your account. A device can be connected to only one account at a time. Then review collection permission and approve the iPad’s VPN request.</Text>
     {error && <Text accessibilityRole="alert" style={ui.body}>{error}</Text>}
     <Card>
       <Text style={ui.h2}>This device</Text>
       <Pressable accessibilityRole="button" disabled={busy || collectionBusy || !native?.provision} style={{minHeight:44,justifyContent:'center'}} onPress={() => Alert.alert('Enroll this device?', 'Link this device securely to your signed-in account. Collection remains off until you choose Set Up Collection and approve its purpose.', [
-        { text: 'Cancel', style: 'cancel' }, { text: 'Enroll', onPress: () => { void run(() => enrollCurrentDevice(manager, native)); } },
-      ])}><Text style={ui.label}>{busy ? 'PLEASE WAIT…' : 'ENROLL THIS DEVICE'}</Text></Pressable>
+        { text: 'Cancel', style: 'cancel' }, { text: 'Connect', onPress: () => { void run(async () => {
+          const subjectId = manager.user?.subjectId;
+          const deviceId = await enrollCurrentDevice(manager, native);
+          if (subjectId && manager.user?.subjectId === subjectId) setConnectedDevice({ subjectId, deviceId });
+        }); } },
+      ])}><Text style={ui.label}>{busy ? 'PLEASE WAIT…' : 'CONNECT THIS DEVICE'}</Text></Pressable>
+      {connectedDevice?.subjectId === user.subjectId && <Text accessibilityRole="alert" style={ui.body}>This iPad is connected to your account. Next: Set Up Collection below to review its purpose and VPN permission. Collection has not started.</Text>}
       {!native?.provision && <Text accessibilityRole="alert" style={ui.body}>Secure current-device enrollment is unavailable in this build. Use a verified iOS staging build containing the Packet Tunnel extension. Android enrollment requires its existing native device proof; contact staging support. No fallback collector will start.</Text>}
     </Card>
     <Card>
@@ -70,7 +76,7 @@ export default function MyDevices() {
       </Card>)}
       <Pressable accessibilityRole="button" disabled={busy || collectionBusy} style={{minHeight:44,justifyContent:'center'}} onPress={() => { void refresh(); }}><Text style={ui.label}>REFRESH DEVICES</Text></Pressable>
     </Card>
-    {Platform.OS === 'ios' ? <IosCollectorControls disabled={busy || collectionBusy} /> : <Card><Text style={ui.h2}>Set Up Collection</Text><Text style={ui.body}>Native setup from My Devices is unavailable on this platform. Review existing monitoring controls and Permissions. Collection has not been enabled by this screen.</Text></Card>}
+    {Platform.OS === 'ios' ? <IosCollectorControls disabled={busy} onBusyChange={setCollectionBusy} /> : <Card><Text style={ui.h2}>Set Up Collection</Text><Text style={ui.body}>Native setup from My Devices is unavailable on this platform. Review existing monitoring controls and Permissions. Collection has not been enabled by this screen.</Text></Card>}
     <Pressable accessibilityRole="button" style={{minHeight:44,justifyContent:'center'}} onPress={() => router.push('/permissions')}><Text style={ui.label}>REVIEW PERMISSIONS</Text></Pressable>
   </Screen>;
 }

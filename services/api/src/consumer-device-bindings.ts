@@ -1,6 +1,10 @@
 ﻿import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 
+export class DeviceOwnershipConflict extends Error {
+  constructor() { super('device_already_linked'); }
+}
+
 export interface ConsumerDeviceBinding {
   binding_id: string;
   subject_id: string;
@@ -52,6 +56,11 @@ implements ConsumerDeviceBindingStore {
   }): Promise<ConsumerDeviceBinding> {
     const key = `${input.subjectId}:${input.deviceId}`;
     const existing = this.bindings.get(key);
+
+    if ([...this.bindings.values()].some(binding => binding.device_id === input.deviceId &&
+      binding.status === 'active' && binding.subject_id !== input.subjectId)) {
+      throw new DeviceOwnershipConflict();
+    }
 
     if (existing?.status === 'active') return clone(existing);
 
@@ -158,6 +167,9 @@ implements ConsumerDeviceBindingStore {
 
       CREATE INDEX IF NOT EXISTS idx_consumer_device_bindings_device
         ON consumer_device_bindings(device_id);
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_consumer_device_single_owner
+        ON consumer_device_bindings(device_id) WHERE status='active';
     `);
   }
 
@@ -173,7 +185,8 @@ implements ConsumerDeviceBindingStore {
 
     const now = new Date().toISOString();
 
-    const result = await this.pool.query(
+    let result;
+    try { result = await this.pool.query(
       `INSERT INTO consumer_device_bindings(
         binding_id,
         subject_id,
@@ -207,7 +220,13 @@ implements ConsumerDeviceBindingStore {
         input.appVersion?.trim() || null,
         now,
       ],
-    );
+    ); } catch (error) {
+      if ((error as { code?: string; constraint?: string }).code === '23505' &&
+          (error as { constraint?: string }).constraint === 'idx_consumer_device_single_owner') {
+        throw new DeviceOwnershipConflict();
+      }
+      throw error;
+    }
 
     return mapBinding(result.rows[0]);
   }

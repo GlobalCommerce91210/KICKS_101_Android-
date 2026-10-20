@@ -21,6 +21,17 @@ test('account-authorized native proof provisioning is idempotent, preserves exis
   const device=store.devices.get(input.deviceId)!;assert.ok(device);assert.notEqual(device.subjectId,subjectId);
   assert.ok(!JSON.stringify(device).includes(input.deviceToken));assert.equal(store.consents.length,0);
   assert.equal((await bindings.list(subjectId))[0]?.collector_subject_id,device.subjectId);
+  const otherAccount = await app.inject({ method: 'POST', url: '/core/identity/v1/account', headers: { 'idempotency-key': randomUUID() },
+    payload: { email: 'other-enroll@example.test', password: 'Synthetic-Password-2026', terms_version: 'one', privacy_version: 'one' } });
+  const otherSubject = otherAccount.json().account.subject_id;
+  const otherSession = await identity.issueSessionForSubject(otherSubject); assert.ok(otherSession);
+  const conflict = await app.inject({ method: 'POST', url: '/core/consumer/v1/devices',
+    headers: { authorization: 'Bearer ' + otherSession.access_token },
+    payload: { device_id: input.deviceId, device_binding_token: input.deviceToken, platform: 'ios' } });
+  assert.equal(conflict.statusCode, 409);
+  assert.equal(conflict.json().error, 'device_already_linked');
+  assert.equal((await bindings.list(otherSubject)).length, 0);
+  assert.equal((await bindings.list(subjectId)).length, 1);
   assert.equal((await app.inject({method:'POST',url,headers,payload:{...input,deviceToken:randomBytes(32).toString('base64url')}})).statusCode,409);
   assert.equal((await app.inject({method:'POST',url,headers,payload:{...input,requestId:randomUUID()}})).statusCode,409);
   assert.equal((await app.inject({method:'POST',url,headers,payload:{...input,deviceId:randomUUID(),requestId:randomUUID()}})).statusCode,409);

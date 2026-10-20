@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { ComplianceEngine } from './compliance.js';
 import type { ConsumerIdentityStore } from './consumer-identity.js';
 import type { ConsumerDeviceBindingStore } from './consumer-device-bindings.js';
+import { DeviceOwnershipConflict } from './consumer-device-bindings.js';
 import type { PermissionsEngine } from './permissions.js';
 import type { Store } from './store.js';
 import type { WalletEngine } from './wallet.js';
@@ -544,14 +545,22 @@ export function registerKicksConsumerRoutes(
       });
     }
 
-    const binding = await deviceBindingStore.bind({
+    let binding;
+    try { binding = await deviceBindingStore.bind({
       subjectId: consumer.subjectId,
       deviceId: collectorDevice.id,
       collectorSubjectId: collectorDevice.subjectId,
       displayName: parsed.data.display_name,
       platform: parsed.data.platform,
       appVersion: parsed.data.app_version,
-    });
+    }); } catch (error) {
+      if (error instanceof DeviceOwnershipConflict) return reply.code(409).send({
+        error: 'device_already_linked',
+        message: 'This device is already connected to another account. Use the existing account to review its connection.',
+        request_id: request.id,
+      });
+      throw error;
+    }
 
     return reply.code(201).send(binding);
   });
