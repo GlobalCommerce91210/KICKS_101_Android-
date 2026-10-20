@@ -252,8 +252,18 @@ private actor NativeEnrollment {
         // A persisted API lease is insufficient: the fixed gateway must acknowledge
         // this exact revision, activation and recovery epoch before we save it.
         var applied = false
+        var gatewayMessage = "The gateway has not confirmed this iPad’s current authorization. Please retry after setup is ready."
         for _ in 0..<5 {
             let status = try await request("/core/consumer/v1/devices/\(existing.deviceId)/ios-gateway-status", bearer: bearer, body: [:])
+            switch status["reason"] as? String {
+            case "recovery_hold", "recovery_epoch_mismatch":
+                gatewayMessage = "Monitoring is paused for a recovery check. Your existing enrollment has been preserved."
+            case "recovery_authority_unavailable", "lease_store_unavailable", "authorization_unavailable":
+                gatewayMessage = "The authorization service is unavailable. Your existing enrollment has been preserved. Please retry later."
+            case "authorization_inactive":
+                gatewayMessage = "Monitoring permission is no longer active. Review your permission before reconnecting."
+            default: break
+            }
             if status["ready"] as? Bool == true,
                status["revision"] as? String == revision,
                status["recoveryEpoch"] as? String == recoveryEpoch,
@@ -265,7 +275,7 @@ private actor NativeEnrollment {
             try await Task.sleep(nanoseconds: 1_000_000_000)
         }
         guard applied, expiry > Date() else {
-            throw failure("The gateway has not confirmed this iPad’s current authorization. Please retry after setup is ready.")
+            throw failure(gatewayMessage)
         }
         // Never trust an upstream response to supply or replace a device private key.
         wireguard["privateKey"] = existing.privateKey

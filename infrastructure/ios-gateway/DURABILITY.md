@@ -84,5 +84,27 @@ and retention through the actual database provider after identifying it, then te
 recovery to a time immediately before and after a consent withdrawal. Record backup
 age, WAL gap, restore duration, last committed batch receipt, ownership history and
 revocation reconciliation. Do not claim RPO/RTO or PITR until that drill passes.
+The restore script now requires `KICKS_RESTORE_EXPECTED_SHA256` from an independently
+retained manifest and verifies ciphertext before contacting the target database.
+It rejects a missing/mismatched digest and symlink input. This is an integrity
+preflight; it does not establish who signed or retained the manifest.
+
+Outbox reads and mutations now take an exclusive nonblocking filesystem lock,
+including across separate actor instances/processes. Busy storage rejects the
+operation for retry rather than overwriting another writer's state. Authenticated
+archives also validate entry digests and unique batch identities. Local diagnostics
+report only queue state/count: pending, empty, expired/clock-skew retained,
+storage busy, or unreadable retained. A retained file is never treated as empty.
+Storage diagnostics do not authorize an upload or enable collection.
+
+The authenticated device gateway status reports a bounded reason, check time,
+acknowledgment age when available and request ID. Reasons distinguish pending/stale
+gateway acknowledgment, clock skew, inactive authorization, recovery hold/epoch
+mismatch, and unavailable dependencies. Unexpected exceptions become generic
+unavailable states; their messages are not returned. Not-ready checks emit a
+structured reason event. The native setup uses fixed messages for recovery holds,
+inactive permission and service outages. These are point-in-time diagnostics,
+not historical metrics, alerts or physical-device collection evidence.
+
 Off-host configuration, scheduling, retention lock, provider WAL/PITR and a real
 restore drill remain operational setup requirements.

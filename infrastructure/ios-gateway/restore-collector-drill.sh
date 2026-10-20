@@ -5,8 +5,14 @@ umask 077
 : "${PGSERVICE:?Isolated restore database service required}"
 : "${KICKS_RESTORE_CIPHERTEXT:?Downloaded encrypted backup path required}"
 : "${KICKS_RESTORE_AGE_IDENTITY:?Protected local age identity file required}"
+: "${KICKS_RESTORE_EXPECTED_SHA256:?Independently retained ciphertext SHA-256 required}"
 [[ "$PGSERVICE" =~ ^[A-Za-z0-9_.-]+$ ]] || exit 2
-for command in psql pg_restore age; do command -v "$command" >/dev/null; done
+[[ "$KICKS_RESTORE_EXPECTED_SHA256" =~ ^[a-fA-F0-9]{64}$ ]] || exit 2
+[[ -f "$KICKS_RESTORE_CIPHERTEXT" && ! -L "$KICKS_RESTORE_CIPHERTEXT" ]] || exit 2
+for command in psql pg_restore age sha256sum; do command -v "$command" >/dev/null; done
+actual_hash="$(sha256sum -- "$KICKS_RESTORE_CIPHERTEXT")"
+actual_hash="${actual_hash%% *}"
+[[ "${actual_hash,,}" == "${KICKS_RESTORE_EXPECTED_SHA256,,}" ]] || { echo 'Ciphertext hash mismatch; restore blocked.' >&2; exit 2; }
 database="$(psql --no-password -XAtqc 'SELECT current_database()')"
 [[ "$database" =~ ^kicks_restore_[a-z0-9_]+$ ]] || { echo 'Dedicated kicks_restore_ database required.' >&2; exit 2; }
 tables="$(psql --no-password -XAtqc "SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema')")"

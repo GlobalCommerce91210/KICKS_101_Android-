@@ -35,6 +35,8 @@ jobs:
       - run: npm ci
       - name: Validate backup and isolated restore script syntax
         run: bash -n infrastructure/ios-gateway/backup-collector.sh infrastructure/ios-gateway/restore-collector-drill.sh
+      - name: Verify restore preservation preflight with isolated fake clients
+        run: node --test infrastructure/ios-gateway/restore-drill.test.mjs
       - run: npm run typecheck --workspace @kicks/api
       - name: Validate migration and restart contract against PostgreSQL
         run: node --import tsx --test services/api/src/postgres-account-consent.test.ts services/api/src/collector-recovery.test.ts

@@ -189,11 +189,28 @@ export class IosGatewayEnrollment {
   }
   async status(accountSubjectId: string, deviceId: string) {
     const now = this.clock();
-    const lease = (await this.dependencies.leases.list(now)).find(row => row.deviceId === deviceId && row.accountSubjectId === accountSubjectId);
-    if (!lease || lease.recoveryEpoch !== this.config.recoveryEpoch ||
-      (await this.authorized(lease))?.activationId !== lease.activationId) return { ready: false };
+    const unavailable = (reason: string) => ({ ready: false, reason, checkedAt: new Date(now).toISOString(), collectionEnabled: false });
+    if (this.config.recoveryEpoch) {
+      try {
+        if (!this.dependencies.recovery) return unavailable('recovery_authority_unavailable');
+        await this.dependencies.recovery.assertReady(this.config.recoveryEpoch);
+      } catch (error) {
+        return unavailable(error instanceof Error && error.message === 'collector_recovery_hold' ? 'recovery_hold' : 'recovery_authority_unavailable');
+      }
+    }
+    let lease: GatewayLease | undefined;
+    try { lease = (await this.dependencies.leases.list(now)).find(row => row.deviceId === deviceId && row.accountSubjectId === accountSubjectId); }
+    catch { return unavailable('lease_store_unavailable'); }
+    if (!lease) return unavailable('no_current_lease');
+    if (lease.recoveryEpoch !== this.config.recoveryEpoch) return unavailable('recovery_epoch_mismatch');
+    try {
+      if ((await this.authorized(lease))?.activationId !== lease.activationId) return unavailable('authorization_inactive');
+    } catch { return unavailable('authorization_unavailable'); }
     const applied = Date.parse(lease.appliedAt ?? '');
-    return { ready: Number.isFinite(applied) && applied >= now - 10_000 && applied <= now,
+    const ready = Number.isFinite(applied) && applied >= now - 10_000 && applied <= now;
+    return { ready, reason: ready ? 'gateway_applied' : !Number.isFinite(applied) ? 'gateway_pending_ack' : applied > now ? 'gateway_clock_skew' : 'gateway_ack_stale',
+      checkedAt: new Date(now).toISOString(), collectionEnabled: false,
+      acknowledgmentAgeSeconds: Number.isFinite(applied) ? Math.max(0, Math.floor((now-applied)/1000)) : null,
       revision: lease.revision, recoveryEpoch: lease.recoveryEpoch, activationId: lease.activationId, expiresAt: lease.expiresAt };
   }
 }

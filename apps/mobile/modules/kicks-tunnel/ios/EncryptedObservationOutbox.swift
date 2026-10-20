@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Darwin
 
 // Storage primitive for a reviewed observation producer. This does not enable
 // collection or manufacture observations, and never holds account/device tokens.
@@ -16,7 +17,13 @@ actor EncryptedObservationOutbox {
         let payload: Data
     }
     struct Archive: Codable { let scope: Scope; var entries: [Entry] }
-    enum Failure: Error { case invalidScope, corruptArchive, capacity, expired, receiptMismatch, identityConflict }
+    enum Failure: Error { case invalidScope, corruptArchive, capacity, expired, receiptMismatch, identityConflict, storageBusy, storageUnavailable }
+    struct Diagnostics: Encodable {
+        let state: String
+        let queuedBatches: Int?
+        let hasUnexpiredBatches: Bool
+        let collectionEnabled = false
+    }
     private let file: URL
     private let key: SymmetricKey
     private let scope: Scope
@@ -27,9 +34,21 @@ actor EncryptedObservationOutbox {
     // The caller supplies a ThisDeviceOnly Keychain key and a dedicated app-group
     // path. A missing key must be an error; never replace a key for an existing file.
     init(file: URL, key: SymmetricKey, scope: Scope) throws {
-        guard key.bitCount == 256, UUID(uuidString: scope.deviceId) != nil,
+        guard file.isFileURL,
+              key.bitCount == 256, UUID(uuidString: scope.deviceId) != nil,
               UUID(uuidString: scope.activationId) != nil, UUID(uuidString: scope.recoveryEpoch) != nil else { throw Failure.invalidScope }
-        self.file = file; self.key = key; self.scope = scope
+        self.file = file.deletingLastPathComponent().resolvingSymlinksInPath().appendingPathComponent(file.lastPathComponent)
+        self.key = key; self.scope = scope
+    }
+    // A Swift actor serializes one instance only. The lock file also serializes
+    // separate instances/processes, preventing a stale read from replacing data.
+    private func withLock<T>(_ operation: () throws -> T) throws -> T {
+        let descriptor = Darwin.open(file.path + ".lock", O_RDWR | O_CREAT | O_NOFOLLOW, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else { throw Failure.storageUnavailable }
+        defer { Darwin.close(descriptor) }
+        guard Darwin.flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { throw Failure.storageBusy }
+        defer { Darwin.flock(descriptor, LOCK_UN) }
+        return try operation()
     }
     private func context() throws -> Data {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
@@ -43,8 +62,13 @@ actor EncryptedObservationOutbox {
         let encrypted = try Data(contentsOf: file)
         do {
             let clear = try AES.GCM.open(AES.GCM.SealedBox(combined: encrypted), using: key, authenticating: context())
+            guard clear.count <= maxBytes else { throw Failure.corruptArchive }
             let archive = try JSONDecoder().decode(Archive.self, from: clear)
-            guard archive.scope == scope, archive.entries.count <= maxEntries else { throw Failure.corruptArchive }
+            guard archive.scope == scope, archive.entries.count <= maxEntries,
+                  Set(archive.entries.map { $0.batchId }).count == archive.entries.count,
+                  archive.entries.allSatisfy({ entry in
+                    UUID(uuidString: entry.batchId) != nil && entry.payloadDigest == SHA256.hash(data: entry.payload).map { String(format: "%02x", $0) }.joined()
+                  }) else { throw Failure.corruptArchive }
             return archive
         } catch { throw Failure.corruptArchive }
     }
@@ -67,6 +91,7 @@ actor EncryptedObservationOutbox {
         try handle.synchronize()
     }
     func enqueue(batchId: String, canonicalPayload: Data, now: Date = Date()) throws {
+      try withLock {
         guard UUID(uuidString: batchId) != nil, canonicalPayload.count <= 128_000 else { throw Failure.capacity }
         guard let batch = try JSONSerialization.jsonObject(with: canonicalPayload) as? [String: Any],
               batch["batchId"] as? String == batchId,
@@ -81,15 +106,34 @@ actor EncryptedObservationOutbox {
         }
         archive.entries.append(Entry(batchId: batchId, payloadDigest: digest, createdAt: now, payload: canonicalPayload))
         try save(archive)
+      }
     }
     // Caller must revalidate current device/consent/epoch before every upload.
     // Expired entries remain protected for explicit disposition; never upload them.
     func pending(now: Date = Date()) throws -> [Entry] {
+      try withLock {
         let entries = try load().entries
         guard entries.allSatisfy({ $0.createdAt <= now && now.timeIntervalSince($0.createdAt) <= maxAge }) else { throw Failure.expired }
         return entries
+      }
+    }
+    // Local diagnostic metadata only: never emits identifiers, keys or payloads.
+    func diagnostics(now: Date = Date()) -> Diagnostics {
+        do {
+            return try withLock {
+                let entries = try load().entries
+                let eligible = entries.allSatisfy { $0.createdAt <= now && now.timeIntervalSince($0.createdAt) <= maxAge }
+                return Diagnostics(state: eligible ? (entries.isEmpty ? "empty" : "pending") : "expired_or_clock_skew_retained",
+                    queuedBatches: entries.count, hasUnexpiredBatches: eligible && !entries.isEmpty)
+            }
+        } catch Failure.storageBusy {
+            return Diagnostics(state: "storage_busy", queuedBatches: nil, hasUnexpiredBatches: false)
+        } catch {
+            return Diagnostics(state: "unreadable_retained", queuedBatches: nil, hasUnexpiredBatches: false)
+        }
     }
     func acknowledge(batchId: String, payloadDigest: String, receiptId: String, accepted: Int) throws {
+      try withLock {
         guard UUID(uuidString: receiptId) != nil, accepted > 0 else { throw Failure.receiptMismatch }
         var archive = try load()
         guard let index = archive.entries.firstIndex(where: { $0.batchId == batchId }),
@@ -98,5 +142,6 @@ actor EncryptedObservationOutbox {
               let observations = batch["observations"] as? [Any], observations.count == accepted else { throw Failure.receiptMismatch }
         archive.entries.remove(at: index)
         try save(archive)
+      }
     }
 }

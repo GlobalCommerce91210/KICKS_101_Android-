@@ -441,7 +441,9 @@ export function registerKicksConsumerRoutes(
     const authorized = await accountBinding(request.headers.authorization, deviceId);
     if (!authorized) return reply.code(401).send({ error: 'unauthorized' });
     if (!authorized.binding) return reply.code(404).send({ error: 'device_binding_not_found' });
-    return gateway.enrollment.status(authorized.consumer.subjectId, deviceId);
+    const status = await gateway.enrollment.status(authorized.consumer.subjectId, deviceId);
+    if (!status.ready) request.log.info({ event: 'collector.gateway.not_ready', reason: status.reason }, 'Collector gateway check');
+    return { ...status, requestId: request.id };
   });
 
   app.get('/core/consumer/v1/devices/:deviceId/consent', async (request, reply) => {
