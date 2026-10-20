@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SessionManager, SessionError } from './sessionCore.ts';
+import { enrollCurrentDevice } from './deviceService.mjs';
 
 test('server sign-out failure still clears local credentials and reports the uncertainty', async () => {
     const f = fixture();
@@ -170,6 +171,7 @@ test('native provisioning shares the current refresh flow without persisting a b
   const f = fixture({ expired: true });
   await f.manager.login('owner@example.test', 'password');
   const generation = f.manager.sessionGeneration;
+  const identity = f.manager.user;
   let handedOff;
   const native = { async provision(origin, bearer, subject) { handedOff = {origin,bearer,subject}; return 'ipad'; } };
   const [device] = await Promise.all([f.manager.provisionIosCollector(native), f.manager.request('/core/consumer/v1/devices')]);
@@ -177,10 +179,26 @@ test('native provisioning shares the current refresh flow without persisting a b
   assert.equal(handedOff.bearer, 'rotated-access');
   assert.ok(!f.saved.includes('rotated-access'));
   assert.equal(f.manager.sessionGeneration, generation);
+  assert.equal(f.manager.user, identity);
   await f.manager.logout();
   assert.notEqual(f.manager.sessionGeneration, generation);
   await f.manager.login('owner@example.test', 'password');
   assert.notEqual(f.manager.sessionGeneration, generation);
+});
+
+test('expiring session refresh cannot turn successful native enrollment into a false account-switch failure', async () => {
+  const f = fixture({ expired: true });
+  const manager = new SessionManager(f.storage, () => 'https://beta.example.test', async (url, init) => {
+    if (String(url).endsWith('/core/consumer/v1/devices')) return Response.json({ devices: [
+      { device_id:'ipad', subject_id:'ds-sub', platform:'ios', status:'active' },
+    ] });
+    return f.transport(url, init);
+  });
+  await manager.login('owner@example.test', 'password');
+  const identity = manager.user;
+  assert.equal(await enrollCurrentDevice(manager, { provision: async () => 'ipad' }), 'ipad');
+  assert.equal(f.refreshes, 1);
+  assert.equal(manager.user, identity);
 });
 test('logout while native provisioning is pending rejects its public result', async () => {
   const f = fixture(); await f.manager.login('owner@example.test', 'password');

@@ -68,7 +68,10 @@ export class SessionManager {
       await this.storage.write(JSON.stringify({ origin, refreshToken: data.refresh_token }));
     });
     if (epoch !== this.epoch) throw new SessionError('Sign-in was canceled.');
-    this.user = user; this.accessToken = data.access_token; this.refreshToken = data.refresh_token;
+    // A token refresh is the same verified login. Keep its identity reference stable
+    // so in-flight device/profile work does not mistake rotation for an account switch.
+    this.user = this.user?.subjectId === user.subjectId && this.user.email === user.email ? this.user : user;
+    this.accessToken = data.access_token; this.refreshToken = data.refresh_token;
     this.expiresAt = Date.now() + data.expires_in * 1000;
     this.emit();
   }
