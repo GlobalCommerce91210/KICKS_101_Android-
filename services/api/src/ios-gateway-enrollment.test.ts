@@ -34,6 +34,8 @@ test('staging leases require account ownership, native device proof and current 
   assert.equal((await app.inject({method:'POST',url:leaseUrl,payload:input})).statusCode,401);
   assert.equal((await app.inject({method:'POST',url:leaseUrl,headers,payload:{...input,deviceToken:'not-a-device-secret'}})).statusCode,403);
   assert.equal((await app.inject({method:'POST',url:leaseUrl,headers,payload:{...input,publicKey:Buffer.alloc(32).toString('base64')}})).statusCode,403);
+  assert.equal((await app.inject({method:'POST',url:leaseUrl,headers,payload:input})).statusCode,403);
+  await identity.verifyEmail(account.json().account.subject_id);
   const response=await app.inject({method:'POST',url:leaseUrl,headers,payload:input});
   assert.equal(response.statusCode,200); const lease=response.json();
   assert.equal(lease.activationId,grant.json().activationId); assert.equal(lease.collectionEnabled,false);

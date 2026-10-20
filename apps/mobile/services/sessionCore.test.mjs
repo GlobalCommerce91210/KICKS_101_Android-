@@ -169,12 +169,18 @@ test('rejected refresh clears identity even before the old access token expires'
 test('native provisioning shares the current refresh flow without persisting a bearer', async () => {
   const f = fixture({ expired: true });
   await f.manager.login('owner@example.test', 'password');
+  const generation = f.manager.sessionGeneration;
   let handedOff;
   const native = { async provision(origin, bearer, subject) { handedOff = {origin,bearer,subject}; return 'ipad'; } };
   const [device] = await Promise.all([f.manager.provisionIosCollector(native), f.manager.request('/core/consumer/v1/devices')]);
   assert.equal(device, 'ipad'); assert.equal(f.refreshes, 1);
   assert.equal(handedOff.bearer, 'rotated-access');
   assert.ok(!f.saved.includes('rotated-access'));
+  assert.equal(f.manager.sessionGeneration, generation);
+  await f.manager.logout();
+  assert.notEqual(f.manager.sessionGeneration, generation);
+  await f.manager.login('owner@example.test', 'password');
+  assert.notEqual(f.manager.sessionGeneration, generation);
 });
 test('logout while native provisioning is pending rejects its public result', async () => {
   const f = fixture(); await f.manager.login('owner@example.test', 'password');

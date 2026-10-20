@@ -1,16 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activateIosCollector } from './iosCollectorActivation.mjs';
+import { activateIosCollector, verifiedCollectorConnection } from './iosCollectorActivation.mjs';
 function fixture() {
   const calls = []; let consent = null; let subject = 'account-1';
   const policy = {permissionId:'permission-1',policyVersion:'v1',purposeVersion:'v1',purpose:'existing approved purpose'};
   const native = {
     async getDeviceId(){calls.push('device');return 'this-ipad';}, async prepare(){calls.push('prepare');},
     async requestAuthorization(){calls.push('ios_prompt');return 'authorized';}, async start(){calls.push('start');}, async stop(){calls.push('stop');},
-    async getStatus(){return {deviceId:'this-ipad',permissionId:'permission-1',connected:true,consentVerified:true,collecting:true,lastAcceptedObservationAt:new Date().toISOString()};}
+    async getStatus(){return calls.includes('stop') ? { connected:false, collecting:false } : {deviceId:'this-ipad',permissionId:'permission-1',activationId:'activation-1',expiresAt:new Date(Date.now()+240_000).toISOString(),connected:true,consentVerified:true,collecting:true,lastAcceptedObservationAt:new Date().toISOString()};}
   };
   const deps = {subject:()=>subject,policy,native,async disclose(){calls.push('disclosure');return true;},
-    async readConsent(){calls.push('read');return consent;},async grantConsent(){calls.push('grant');consent={...policy,action:'grant',deviceId:'this-ipad',subjectId:'account-1'};},onState:state=>calls.push(state)};
+    async readConsent(){calls.push('read');return consent;},async grantConsent(){calls.push('grant');consent={...policy,action:'grant',activationId:'activation-1',deviceId:'this-ipad',subjectId:'account-1'};},onState:state=>calls.push(state),wait:async()=>{}};
   return {calls,deps,set subject(value){subject=value;},set consent(value){consent=value;}};
 }
 
@@ -26,7 +26,7 @@ test('disclosure precedes saved consent, OS authorization and verified collectio
   assert.ok(f.calls.indexOf('disclosure')<f.calls.indexOf('grant'));
   assert.ok(f.calls.indexOf('grant')<f.calls.indexOf('ios_prompt'));
   assert.ok(f.calls.indexOf('ios_prompt')<f.calls.indexOf('start'));
-  assert.equal(f.calls.filter(x=>x==='read').length,3);
+  assert.equal(f.calls.filter(x=>x==='read').length,4);
 });
 test('cancel saves no consent and opens no OS prompt',async()=>{const f=fixture();f.deps.disclose=async()=>false;assert.equal((await activateIosCollector(f.deps)).state,'off');assert.deepEqual(f.calls,[]);});
 test('missing native bridge saves no consent',async()=>{const f=fixture();f.deps.native=undefined;await assert.rejects(activateIosCollector(f.deps),/does not include/);assert.deepEqual(f.calls,['disclosure']);});
@@ -34,8 +34,8 @@ test('OS rejection does not start',async()=>{const f=fixture();f.deps.native.req
 test('withdrawal during OS prompt prevents startup',async()=>{const f=fixture();f.deps.native.requestAuthorization=async()=>{f.consent=null;return 'authorized';};await assert.rejects(activateIosCollector(f.deps),/withdrawn/);assert.ok(!f.calls.includes('start'));});
 test('account change during OS prompt prevents startup',async()=>{const f=fixture();f.deps.native.requestAuthorization=async()=>{f.subject='other';return 'authorized';};await assert.rejects(activateIosCollector(f.deps),/account changed/);assert.ok(!f.calls.includes('start'));});
 test('another device consent cannot authorize this iPad',async()=>{const f=fixture();f.deps.grantConsent=async()=>{f.consent={...f.deps.policy,action:'grant',deviceId:'other',subjectId:'account-1'};};await assert.rejects(activateIosCollector(f.deps),/could not be verified/);assert.ok(!f.calls.includes('ios_prompt'));});
-test('connected tunnel without new ingestion evidence is not collecting',async()=>{const f=fixture();f.deps.native.getStatus=async()=>({deviceId:'this-ipad',permissionId:'permission-1',connected:true,consentVerified:true,collecting:true,lastAcceptedObservationAt:'2020-01-01T00:00:00Z'});assert.equal((await activateIosCollector(f.deps)).state,'connected_waiting_for_evidence');});
-test('unverified status stops tunnel',async()=>{const f=fixture();f.deps.native.getStatus=async()=>({connected:true});await assert.rejects(activateIosCollector(f.deps),/could not be verified/);assert.ok(f.calls.includes('stop'));});
+test('connected tunnel without new ingestion evidence is not collecting',async()=>{const f=fixture();const status=f.deps.native.getStatus;f.deps.native.getStatus=async()=>({...await status(),lastAcceptedObservationAt:'2020-01-01T00:00:00Z'});assert.equal((await activateIosCollector(f.deps)).state,'connected_waiting_for_evidence');});
+test('unverified status stops tunnel',async()=>{const f=fixture();f.deps.native.getStatus=async()=>f.calls.includes('stop')?{connected:false,collecting:false}:{connected:true};await assert.rejects(activateIosCollector(f.deps),/could not be verified/);assert.ok(f.calls.includes('stop'));});
 test('failed stop directs user to iOS VPN controls',async()=>{const f=fixture();f.deps.native.getStatus=async()=>null;f.deps.native.stop=async()=>{throw Error('failed');};await assert.rejects(activateIosCollector(f.deps),/iOS Settings/);});
 
 test('native provisioning follows disclosure and lease follows verified grant', async () => {
@@ -62,4 +62,65 @@ test('native enrollment failure leaves collection off without saving consent', a
   const f = fixture(); f.deps.provision = async () => { throw Error('enrollment denied'); };
   await assert.rejects(activateIosCollector(f.deps), /enrollment denied/);
   assert.ok(!f.calls.includes('grant')); assert.ok(!f.calls.includes('start'));
+});
+
+test('startup waits through asynchronous OS connection and provider verification', async () => {
+  const f = fixture(); const status = f.deps.native.getStatus; let reads = 0;
+  f.deps.native.getStatus = async () => {
+    if (!f.calls.includes('start')) return { connected: false, collecting: false };
+    return ++reads < 3 ? { connected: true, consentVerified: false, collecting: false } : status();
+  };
+  f.deps.wait = async () => { f.calls.push('wait'); };
+  assert.equal((await activateIosCollector(f.deps)).state, 'collecting');
+  assert.equal(f.calls.filter(call => call === 'wait').length, 2);
+});
+
+test('extension evidence must match device, permission, activation and bounded unexpired lease', async () => {
+  const f = fixture(); await f.deps.grantConsent(); const consent = await f.deps.readConsent();
+  const good = await f.deps.native.getStatus();
+  assert.equal(verifiedCollectorConnection(good, consent), true);
+  for (const change of [{ deviceId: 'another' }, { permissionId: 'another' }, { activationId: 'old' },
+    { expiresAt: 'invalid' }, { expiresAt: new Date(Date.now()-1).toISOString() },
+    { expiresAt: new Date(Date.now()+600_000).toISOString() }, { consentVerified: false }, { connected: false }]) {
+    assert.equal(verifiedCollectorConnection({ ...good, ...change }, consent), false);
+  }
+});
+
+test('a new grant during the VPN prompt cannot authorize the old lease', async () => {
+  const f = fixture(); f.deps.native.requestAuthorization = async () => {
+    f.consent = { ...f.deps.policy, action: 'grant', activationId: 'new-activation', deviceId: 'this-ipad', subjectId: 'account-1' };
+    return 'authorized';
+  };
+  await assert.rejects(activateIosCollector(f.deps), /withdrawn or changed/);
+  assert.ok(!f.calls.includes('start'));
+});
+
+test('revocation or account change while connecting stops and verifies the VPN', async () => {
+  for (const change of ['revoke', 'account']) {
+    const f = fixture(); const status = f.deps.native.getStatus;
+    f.deps.native.getStatus = async () => f.calls.includes('start') && !f.calls.includes('stop') ? { connected: true, collecting: false } : status();
+    f.deps.wait = async () => { if (change === 'revoke') f.consent = null; else f.subject = 'another'; };
+    await assert.rejects(activateIosCollector(f.deps), /withdrawn|account changed/);
+    assert.ok(f.calls.includes('stop'));
+  }
+});
+
+test('connected transport without accepted observations stays waiting', async () => {
+  const f = fixture(); const status = f.deps.native.getStatus;
+  f.deps.native.getStatus = async () => ({ ...await status(), collecting: false, lastAcceptedObservationAt: undefined });
+  assert.equal((await activateIosCollector(f.deps)).state, 'connected_waiting_for_evidence');
+});
+
+test('a stop call returning success cannot hide an active VPN after failed verification', async () => {
+  const f = fixture(); f.deps.native.getStatus = async () => ({ connected: true, collecting: false });
+  await assert.rejects(activateIosCollector(f.deps), /stop could not be confirmed/);
+});
+
+test('missing policy or activation cannot cause a lease request or VPN prompt', async () => {
+  const f = fixture(); f.deps.policy.purpose = '';
+  await assert.rejects(activateIosCollector(f.deps), /not configured/);
+  assert.deepEqual(f.calls, []);
+  const g = fixture(); g.deps.grantConsent = async () => { g.consent = { ...g.deps.policy, action:'grant', deviceId:'this-ipad', subjectId:'account-1' }; };
+  await assert.rejects(activateIosCollector(g.deps), /could not be verified/);
+  assert.ok(!g.calls.includes('ios_prompt'));
 });

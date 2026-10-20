@@ -13,6 +13,7 @@ export class SessionManager {
   private refreshToken: string | null = null;
   private expiresAt = 0;
   private epoch = 0;
+  get sessionGeneration() { return this.epoch; }
   private refreshFlight: Promise<void> | null = null;
   private writes: Promise<void> = Promise.resolve();
   private listeners = new Set<() => void>();

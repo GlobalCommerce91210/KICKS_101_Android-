@@ -24,6 +24,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
         let deviceId: String
         let permissionId: String
+        let activationId: String
         let tunnelServerHost: String
         let expiresAt: Date
         let wireguard: WireGuard
@@ -44,8 +45,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         decoder.dateDecodingStrategy = .iso8601
         let lease = try decoder.decode(Lease.self, from: data)
         guard UUID(uuidString: lease.deviceId) != nil, UUID(uuidString: lease.permissionId) != nil,
+              UUID(uuidString: lease.activationId) != nil,
               settings.providerConfiguration?["deviceId"] as? String == lease.deviceId,
               settings.providerConfiguration?["permissionId"] as? String == lease.permissionId,
+              settings.providerConfiguration?["activationId"] as? String == lease.activationId,
               settings.serverAddress == lease.tunnelServerHost,
               lease.expiresAt > Date(), lease.expiresAt.timeIntervalSinceNow <= 300 else {
             throw Failure.invalidEnrollment
@@ -122,11 +125,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
+        guard messageData == Data("status-v1".utf8) else { completionHandler?(nil); return }
         stateQueue.async {
             // Never return a key, raw WireGuard configuration, or a false collecting claim.
+            let valid = self.lease.map { $0.expiresAt > Date() } ?? false
             let status: [String: Any] = ["deviceId": self.lease?.deviceId ?? "",
                 "permissionId": self.lease?.permissionId ?? "", "collecting": false,
-                "consentVerified": false, "transportConfigured": self.lease != nil]
+                "activationId": self.lease?.activationId ?? "",
+                "expiresAt": self.lease.map { ISO8601DateFormatter().string(from: $0.expiresAt) } ?? "",
+                "consentVerified": valid, "transportConfigured": valid]
             completionHandler?(try? JSONSerialization.data(withJSONObject: status))
         }
     }

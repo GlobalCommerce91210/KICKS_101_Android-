@@ -1,10 +1,21 @@
 export class CollectorActivationError extends Error {}
 
+export function verifiedCollectorConnection(status, consent, now = Date.now()) {
+  const expiry = Date.parse(status?.expiresAt ?? '');
+  return !!consent?.activationId && status?.connected === true && status.consentVerified === true &&
+    status.deviceId === consent.deviceId && status.permissionId === consent.permissionId &&
+    status.activationId === consent.activationId && Number.isFinite(expiry) && expiry > now && expiry <= now + 300_000;
+}
+
 // The native adapter must own its device identity and secure enrollment material.
 // UI toggles and a saved consent record are never evidence of collection.
 export async function activateIosCollector(deps) {
   const subject = deps.subject();
   if (!subject) throw new CollectorActivationError('Sign in to DataStorm before starting monitoring.');
+  if (!deps.policy || !['permissionId', 'policyVersion', 'purposeVersion', 'purpose'].every(key =>
+    typeof deps.policy[key] === 'string' && deps.policy[key].trim())) {
+    throw new CollectorActivationError('The reviewed collection purpose is not configured. Monitoring remains off.');
+  }
   if (!await deps.disclose()) return { state: 'off', reason: 'disclosure_canceled' };
   const current = () => {
     if (deps.subject() !== subject) throw new CollectorActivationError('Your account changed. Monitoring remains off.');
@@ -19,7 +30,7 @@ export async function activateIosCollector(deps) {
     const deviceId = await deps.native.getDeviceId();
     current();
     if (!deviceId) throw new CollectorActivationError('Enroll this iPad before starting monitoring.');
-    // Prepare checks this device's enrollment and gateway before saving a grant.
+    // Prepare checks the embedded extension and enrollment; the lease follows the grant.
     await deps.native.prepare(); current();
     let consent = await deps.readConsent(deviceId); current();
     const matches = value => value?.action === 'grant' && value.deviceId === deviceId &&
@@ -30,25 +41,42 @@ export async function activateIosCollector(deps) {
       await deps.grantConsent(deviceId); current();
       consent = await deps.readConsent(deviceId); current();
     }
-    if (!matches(consent)) throw new CollectorActivationError('Saved consent could not be verified. Monitoring remains off.');
+    if (!matches(consent) || !consent.activationId) throw new CollectorActivationError('Saved consent could not be verified. Monitoring remains off.');
     if (deps.renewLease) {
       await deps.renewLease(); current();
       consent = await deps.readConsent(deviceId); current();
-      if (!matches(consent)) throw new CollectorActivationError('Permission was withdrawn. Monitoring remains off.');
+      if (!matches(consent) || !consent.activationId) throw new CollectorActivationError('Permission was withdrawn. Monitoring remains off.');
     }
+    const activationId = consent.activationId;
     deps.onState('vpn_authorization');
     const authorization = await deps.native.requestAuthorization(); current();
     if (authorization !== 'authorized') return { state: 'off', reason: 'vpn_not_authorized' };
     // Recheck after the OS prompt: consent could have been revoked meanwhile.
     consent = await deps.readConsent(deviceId); current();
-    if (!matches(consent)) throw new CollectorActivationError('Permission was withdrawn. Monitoring remains off.');
+    if (!matches(consent) || consent.activationId !== activationId) throw new CollectorActivationError('Permission was withdrawn or changed. Monitoring remains off.');
     const startedAt = Date.now();
     started = true;
     await deps.native.start(); current();
-    const status = await deps.native.getStatus(); current();
-    if (!status || status.deviceId !== deviceId || status.permissionId !== deps.policy.permissionId ||
-        status.connected !== true || status.consentVerified !== true) {
-      throw new CollectorActivationError('The collector connection could not be verified. Monitoring was stopped.');
+    deps.onState('connecting');
+    const wait = deps.wait ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
+    let status;
+    const deadline = Date.now() + 15_000;
+    for (let attempt = 0; attempt < 16; attempt++) {
+      status = await deps.native.getStatus(); current();
+      consent = await deps.readConsent(deviceId); current();
+      if (!matches(consent) || consent.activationId !== activationId) {
+        throw new CollectorActivationError('Permission was withdrawn or changed. Monitoring was stopped.');
+      }
+      if (status?.unavailableReason) throw new CollectorActivationError(status.unavailableReason);
+      if (verifiedCollectorConnection(status, consent)) break;
+      if ((status?.deviceId && status.deviceId !== deviceId) ||
+          (status?.permissionId && status.permissionId !== deps.policy.permissionId) ||
+          (status?.activationId && status.activationId !== activationId) ||
+          (status?.expiresAt && Date.parse(status.expiresAt) <= Date.now()) ||
+          attempt === 15 || Date.now() >= deadline) {
+        throw new CollectorActivationError('The collector connection could not be verified. Monitoring was stopped.');
+      }
+      await wait(1000); current();
     }
     const acceptedAt = Date.parse(status.lastAcceptedObservationAt ?? '');
     if (status.collecting !== true || !Number.isFinite(acceptedAt) || acceptedAt < startedAt || acceptedAt > Date.now() + 5000) {
@@ -59,7 +87,11 @@ export async function activateIosCollector(deps) {
     return { state: 'collecting' };
   } catch (error) {
     if (started) {
-      try { await deps.native.stop(); }
+      try {
+        await deps.native.stop();
+        const stopped = await deps.native.getStatus();
+        if (!stopped || stopped.connected !== false || stopped.collecting !== false) throw new Error('unconfirmed');
+      }
       catch { throw new CollectorActivationError('Collector stop could not be confirmed. Turn off KICK’S VPN in iOS Settings.'); }
     }
     throw error;

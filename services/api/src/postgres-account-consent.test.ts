@@ -35,6 +35,14 @@ test('PostgreSQL native device provisioning persists retries and atomically roll
     await bindings.revoke(input.accountSubjectId,input.deviceId);
     await assert.rejects(provisioner.provision(input)); // never revive a removed binding
     assert.equal((await pool.query('SELECT count(*)::int AS n FROM devices')).rows[0].n,1);
+    const second=await identity.createAccount({email:'second-owner@example.test',password:'Synthetic-Password-2026',terms_version:'one',privacy_version:'one'});
+    const competingDevice=randomUUID();
+    const claims=await Promise.allSettled([account.account.subject_id,second.account.subject_id].map(subjectId=>bindings.bind({
+      subjectId,deviceId:competingDevice,collectorSubjectId:randomUUID(),platform:'ios',
+    })));
+    assert.equal(claims.filter(claim=>claim.status==='fulfilled').length,1);
+    assert.equal(claims.filter(claim=>claim.status==='rejected').length,1);
+    assert.equal((await pool.query("SELECT count(*)::int AS n FROM consumer_device_bindings WHERE device_id=$1 AND status='active'",[competingDevice])).rows[0].n,1);
   }finally{await pool.end();await admin.query('DROP SCHEMA '+schema+' CASCADE');await admin.end();}
 });
 

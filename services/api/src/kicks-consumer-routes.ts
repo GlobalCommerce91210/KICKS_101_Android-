@@ -78,6 +78,13 @@ export function registerKicksConsumerRoutes(
     };
   };
 
+  app.get('/core/consumer/v1/monitoring-policy', async (request, reply) => {
+    if (!await authenticateConsumer(request.headers.authorization)) return reply.code(401).send({ error: 'unauthorized' });
+    const policy = dependencies.iosGateway?.enrollment.monitoringPolicy();
+    if (!policy) return reply.code(503).send({ error: 'monitoring_policy_not_configured' });
+    return { policy, collectionEnabled: false };
+  });
+
   const buildSnapshot = async (subjectId: string) => {
     const generatedAt = new Date().toISOString();
 

@@ -9,9 +9,11 @@ import { loadConsumerProfile, type ConsumerProfileView } from '../services/profi
 import { selectIosNativeAdapter } from '../services/iosNativeAdapter.mjs';
 import { enrollCurrentDevice, revokeAndUnlinkDevice } from '../services/deviceService.mjs';
 import { IosCollectorControls } from '../components/IosCollectorControls';
+import { useMonitoringPolicy } from '../components/useMonitoringPolicy';
 
 export default function MyDevices() {
   const { manager, ready, user } = useSession();
+  const { policy } = useMonitoringPolicy();
   const [loaded, setLoaded] = useState<ConsumerProfileView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -71,7 +73,7 @@ export default function MyDevices() {
         <Text style={ui.body}>Collector: {device.collector_status ?? 'unknown'} · Monitoring: {device.monitoring_status ?? 'unavailable'}</Text>
         <Text style={ui.body}>Last observation: {device.last_seen_at ?? 'None verified'}</Text>
         <Pressable accessibilityRole="button" disabled={busy || collectionBusy} style={{minHeight:44,justifyContent:'center'}} onPress={() => Alert.alert('Revoke collection and unlink?', 'Withdraw this build’s collection permission and unlink this device. Existing app data and credentials are preserved. Other sharing permissions can be reviewed in Permissions.', [
-          { text: 'Cancel', style: 'cancel' }, { text: 'Revoke and unlink', style: 'destructive', onPress: () => { void run(() => revokeAndUnlinkDevice(manager, device.device_id, { permissionId: process.env.EXPO_PUBLIC_MONITORING_PERMISSION_ID ?? '' }, native, randomUUID())); } },
+          { text: 'Cancel', style: 'cancel' }, { text: 'Revoke and unlink', style: 'destructive', onPress: () => { void run(() => revokeAndUnlinkDevice(manager, device.device_id, policy, native, randomUUID())); } },
         ])}><Text style={ui.label}>REVOKE & UNLINK</Text></Pressable>
       </Card>)}
       <Pressable accessibilityRole="button" disabled={busy || collectionBusy} style={{minHeight:44,justifyContent:'center'}} onPress={() => { void refresh(); }}><Text style={ui.label}>REFRESH DEVICES</Text></Pressable>

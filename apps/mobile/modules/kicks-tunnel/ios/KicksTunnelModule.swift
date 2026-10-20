@@ -40,6 +40,7 @@ public final class KicksTunnelModule: Module {
 private struct NativeConfiguration: Decodable {
     let deviceId: String
     let permissionId: String
+    let activationId: String
     let tunnelServerHost: String
     let expiresAt: Date
 }
@@ -298,6 +299,7 @@ private final class KicksTunnelController {
         do { config = try decoder.decode(NativeConfiguration.self, from: readKeychain()) }
         catch { throw CollectorFailure(message: "The native enrollment must include a device binding and expiring authorization. Existing credentials were preserved.") }
         guard UUID(uuidString: config.deviceId) != nil, UUID(uuidString: config.permissionId) != nil,
+              UUID(uuidString: config.activationId) != nil,
               !config.tunnelServerHost.isEmpty,
               config.expiresAt > Date(), config.expiresAt.timeIntervalSinceNow <= 300 else {
             throw CollectorFailure(message: "The collector enrollment is incomplete or expired. Monitoring remains off.")
@@ -351,13 +353,19 @@ private final class KicksTunnelController {
         // Only a Keychain reference crosses into the OS profile, never a token.
         settings.passwordReference = try readKeychain(reference: true)
         settings.providerConfiguration = ["schemaVersion": 1, "deviceId": config.deviceId,
-                                          "permissionId": config.permissionId]
+                                          "permissionId": config.permissionId, "activationId": config.activationId]
         profile.protocolConfiguration = settings
         profile.localizedDescription = "KICK’S"
         profile.isEnabled = true
         profile.isOnDemandEnabled = false
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             profile.saveToPreferences { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            profile.loadFromPreferences { error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume() }
             }
@@ -373,6 +381,7 @@ private final class KicksTunnelController {
               let settings = profile.protocolConfiguration as? NETunnelProviderProtocol,
               settings.providerConfiguration?["deviceId"] as? String == config.deviceId,
               settings.providerConfiguration?["permissionId"] as? String == config.permissionId,
+              settings.providerConfiguration?["activationId"] as? String == config.activationId,
               settings.passwordReference == (try readKeychain(reference: true)),
               let session = profile.connection as? NETunnelProviderSession else {
             throw CollectorFailure(message: "The VPN profile does not match this iPad’s current enrollment.")
@@ -392,13 +401,50 @@ private final class KicksTunnelController {
 
     func status() async throws -> [String: Any] {
         let profiles = try await managers()
-        let connected = profiles.contains { [.connected, .connecting, .reasserting, .disconnecting].contains($0.connection.status) }
-        // OS connectivity is insufficient to assert verified consent or ingestion.
-        // The extension evidence protocol must be implemented before enabling this.
-        return ["deviceId": (try? configuration().deviceId) ?? "",
-                "permissionId": (try? configuration().permissionId) ?? "",
-                "connected": connected, "consentVerified": false, "collecting": false,
-                "unavailableReason": "Native collection verification is unavailable in this build. Request a verified staging extension from support. Collection remains off."]
+        // Transitional states remain active for stop verification, but are never authorized.
+        let active = profiles.contains { ![.disconnected, .invalid].contains($0.connection.status) }
+        let unavailable: [String: Any] = ["connected": active, "consentVerified": false, "collecting": false,
+            "connectionState": profiles.first.map { String(describing: $0.connection.status) } ?? "disconnected"]
+        guard profiles.count == 1, let profile = profiles.first,
+              profile.connection.status == .connected, let config = try? configuration(),
+              let settings = profile.protocolConfiguration as? NETunnelProviderProtocol,
+              settings.providerConfiguration?["deviceId"] as? String == config.deviceId,
+              settings.providerConfiguration?["permissionId"] as? String == config.permissionId,
+              settings.providerConfiguration?["activationId"] as? String == config.activationId,
+              let reference = try? readKeychain(reference: true), settings.passwordReference == reference,
+              let session = profile.connection as? NETunnelProviderSession else { return unavailable }
+        let data: Data? = await withCheckedContinuation { continuation in
+            let reply = TunnelStatusReply(continuation)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3) { reply.finish(nil) }
+            do { try session.sendProviderMessage(Data("status-v1".utf8)) { reply.finish($0) } }
+            catch { reply.finish(nil) }
+        }
+        guard let data, data.count <= 4096,
+              let evidence = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              evidence["deviceId"] as? String == config.deviceId,
+              evidence["permissionId"] as? String == config.permissionId,
+              evidence["activationId"] as? String == config.activationId,
+              evidence["expiresAt"] as? String == ISO8601DateFormatter().string(from: config.expiresAt),
+              evidence["transportConfigured"] as? Bool == true,
+              evidence["consentVerified"] as? Bool == true,
+              config.expiresAt > Date(), profile.connection.status == .connected else { return unavailable }
+        // This proves the extension's bounded lease and transport, never ingestion.
+        return ["deviceId": config.deviceId, "permissionId": config.permissionId,
+                "activationId": config.activationId, "expiresAt": ISO8601DateFormatter().string(from: config.expiresAt),
+                "connected": true, "consentVerified": true, "collecting": false]
+    }
+}
+
+private final class TunnelStatusReply: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Data?, Never>?
+    init(_ continuation: CheckedContinuation<Data?, Never>) { self.continuation = continuation }
+    func finish(_ data: Data?) {
+        lock.lock()
+        let pending = continuation
+        continuation = nil
+        lock.unlock()
+        pending?.resume(returning: data)
     }
 }
 

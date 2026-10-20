@@ -5,22 +5,18 @@ import { selectIosNativeAdapter } from '../services/iosNativeAdapter.mjs';
 import { randomUUID } from 'expo-crypto';
 import { Card, ui } from './Brand';
 import { useSession } from './SessionProvider';
-import { activateIosCollector, type BoundCollectorConsent } from '../services/iosCollectorActivation.mjs';
+import { activateIosCollector, verifiedCollectorConnection, type BoundCollectorConsent } from '../services/iosCollectorActivation.mjs';
+import { useMonitoringPolicy } from './useMonitoringPolicy';
 
-const policy = {
-  permissionId: process.env.EXPO_PUBLIC_MONITORING_PERMISSION_ID ?? '',
-  policyVersion: process.env.EXPO_PUBLIC_MONITORING_POLICY_VERSION ?? '',
-  purposeVersion: process.env.EXPO_PUBLIC_MONITORING_PURPOSE_VERSION ?? '',
-  purpose: process.env.EXPO_PUBLIC_MONITORING_PURPOSE ?? '',
-};
-const configured = Object.values(policy).every(Boolean);
 const states: Record<string, string> = {
   off: 'Monitoring is off.', vpn_authorization: 'Waiting for iOS VPN permission.',
+  connecting: 'Connecting and verifying this iPad’s authorization.',
   connected_waiting_for_evidence: 'VPN connected. Collection has not been verified.',
   collecting: 'Collection verified.', stop_unconfirmed: 'Stop could not be confirmed. Turn off KICK’S VPN in iOS Settings.',
 };
 export function IosCollectorControls({ disabled = false, onBusyChange }: { disabled?: boolean; onBusyChange?: (busy: boolean) => void }) {
   const { manager, user } = useSession();
+  const { policy, configured, error: policyError, retry } = useMonitoringPolicy();
   const [state, setState] = useState('off');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -31,19 +27,21 @@ export function IosCollectorControls({ disabled = false, onBusyChange }: { disab
     NativeModules.KicksTunnel);
   const readConsent = async (deviceId: string): Promise<BoundCollectorConsent | null> => {
     const subjectId = manager.user?.subjectId;
+    const generation = manager.sessionGeneration;
     if (!subjectId) throw new Error('Sign in before reviewing permission.');
     // The account API verifies ownership of this device. Collector subjects stay server-side.
     const devicesResponse = await manager.request('/core/consumer/v1/devices');
     if (!devicesResponse.ok) throw new Error('This iPad’s account enrollment could not be verified.');
     const devices = await devicesResponse.json();
-    if (!Array.isArray(devices.devices) || !devices.devices.some((device: {device_id?: string; platform?: string; status?: string}) =>
-      device.device_id === deviceId && device.platform === 'ios' && device.status === 'active')) {
+    if (manager.user?.subjectId !== subjectId || manager.sessionGeneration !== generation) throw new Error('Your account changed. Try again.');
+    if (!Array.isArray(devices.devices) || !devices.devices.some((device: {device_id?: string; subject_id?: string; platform?: string; status?: string}) =>
+      device.device_id === deviceId && device.subject_id === subjectId && device.platform === 'ios' && device.status === 'active')) {
       throw new Error('This iPad must be enrolled with your account before monitoring starts.');
     }
     const response = await manager.request('/core/consumer/v1/devices/' + encodeURIComponent(deviceId) + '/consent?permissionId=' + encodeURIComponent(policy.permissionId));
     if (!response.ok) throw new Error('Consent could not be verified. Monitoring remains off.');
     const result = await response.json();
-    if (manager.user?.subjectId !== subjectId) throw new Error('Your account changed. Try again.');
+    if (manager.user?.subjectId !== subjectId || manager.sessionGeneration !== generation) throw new Error('Your account changed. Try again.');
     return result.consent ? { ...result.consent, deviceId, subjectId } : null;
   };
   const stop = async () => {
@@ -53,13 +51,22 @@ export function IosCollectorControls({ disabled = false, onBusyChange }: { disab
     if (status.connected === true || status.collecting === true) throw new Error('Collector stop could not be confirmed. Turn off KICK’S VPN in iOS Settings.');
     if (mounted.current) setState('off');
   };
+  const stopFromControl = async () => {
+    if (flight.current || disabled) return;
+    flight.current = true; setBusy(true); onBusyChange?.(true); setError(null);
+    try { await stop(); }
+    catch { if (mounted.current) { setState('stop_unconfirmed'); setError('Turn off KICK’S VPN in iOS Settings.'); } }
+    finally { flight.current = false; onBusyChange?.(false); if (mounted.current) setBusy(false); }
+  };
   const start = async () => {
     if (flight.current || disabled) return;
     flight.current = true; setBusy(true); onBusyChange?.(true); setError(null);
     try {
+      const subjectId = manager.user?.subjectId;
+      const generation = manager.sessionGeneration;
       if (!configured) throw new Error('The reviewed collection purpose is not configured for this build. Monitoring remains off.');
       const result = await activateIosCollector({
-        subject: () => mounted.current ? manager.user?.subjectId ?? null : null, policy, native: usableNative,
+        subject: () => mounted.current && manager.sessionGeneration === generation && manager.user?.subjectId === subjectId ? subjectId ?? null : null, policy, native: usableNative,
         provision: usableNative?.provision ? async () => {
           await manager.provisionIosCollector({ provision: usableNative.provision!.bind(usableNative) });
         } : undefined,
@@ -106,8 +113,9 @@ export function IosCollectorControls({ disabled = false, onBusyChange }: { disab
   useEffect(() => {
     if (!usableNative || !['collecting', 'connected_waiting_for_evidence'].includes(state)) return;
     let checking = false; let live = true;
+    const generation = manager.sessionGeneration;
     const verify = async () => {
-      if (checking || !live) return;
+      if (checking || !live || flight.current) return;
       checking = true;
       try {
         const deviceId = await usableNative.getDeviceId();
@@ -117,7 +125,7 @@ export function IosCollectorControls({ disabled = false, onBusyChange }: { disab
           throw new Error('Monitoring permission is no longer active.');
         }
         const status = await usableNative.getStatus();
-        if (status.connected !== true || status.consentVerified !== true || status.deviceId !== deviceId || status.permissionId !== policy.permissionId) {
+        if (manager.sessionGeneration !== generation || !verifiedCollectorConnection(status, consent)) {
           throw new Error('Collector authorization could not be verified.');
         }
         const accepted = Date.parse(status.lastAcceptedObservationAt ?? '');
@@ -130,14 +138,15 @@ export function IosCollectorControls({ disabled = false, onBusyChange }: { disab
     void verify();
     const interval = setInterval(() => { void verify(); }, 15_000);
     return () => { live = false; clearInterval(interval); };
-  }, [user?.subjectId, state]);
+  }, [user?.subjectId, manager.sessionGeneration, state, policy.permissionId, policy.policyVersion, policy.purposeVersion, policy.purpose]);
   return <Card accent>
     <Text style={ui.h2}>Set Up Collection</Text>
+    {policyError && <><Text accessibilityRole="alert" style={ui.body}>{policyError}</Text><Pressable accessibilityRole="button" disabled={busy} onPress={retry}><Text style={ui.label}>RETRY COLLECTION SETUP</Text></Pressable></>}
     {!usableNative && <Text accessibilityRole="alert" style={ui.body}>The native extension is unavailable. Install a verified staging build containing the signed Packet Tunnel extension, then retry. No fallback collection is enabled.</Text>}
     <Text accessibilityRole="alert" style={ui.body}>{states[state] ?? 'Checking collector status.'}</Text>
-    <Pressable accessibilityRole="button" disabled={disabled || busy || state === 'checking' || !usableNative} style={{minHeight:44,justifyContent:'center'}} onPress={() => {
+    <Pressable accessibilityRole="button" disabled={disabled || busy || state === 'checking' || !usableNative || (state === 'off' && !configured)} style={{minHeight:44,justifyContent:'center'}} onPress={() => {
       if (['collecting', 'connected_waiting_for_evidence', 'stop_unconfirmed'].includes(state)) {
-        void stop().catch(() => { setState('stop_unconfirmed'); setError('Turn off KICK’S VPN in iOS Settings.'); });
+        void stopFromControl();
       } else void start();
     }}><Text style={ui.label}>{busy ? 'CHECKING…' : state === 'off' ? 'SET UP COLLECTION' : 'STOP MONITORING'}</Text></Pressable>
     {error && <Text accessibilityRole="alert" style={ui.body}>{error}</Text>}

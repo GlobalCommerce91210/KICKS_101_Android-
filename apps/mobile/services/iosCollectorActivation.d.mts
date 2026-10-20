@@ -1,6 +1,6 @@
 export class CollectorActivationError extends Error {}
 export interface CollectorPolicy { permissionId: string; policyVersion: string; purposeVersion: string; purpose: string; }
-export interface BoundCollectorConsent extends CollectorPolicy { action: string; deviceId: string; subjectId: string; }
+export interface BoundCollectorConsent extends CollectorPolicy { action: string; deviceId: string; subjectId: string; activationId: string; }
 export interface IosCollectorNative {
   provision?(apiOrigin: string, accountBearer: string, accountSubjectId: string): Promise<string>;
   renewLease?(accountBearer: string, permissionId: string): Promise<void>;
@@ -9,8 +9,9 @@ export interface IosCollectorNative {
   requestAuthorization(): Promise<string>;
   start(): Promise<void>;
   stop(): Promise<void>;
-  getStatus(): Promise<{deviceId: string; permissionId: string; connected: boolean; consentVerified: boolean; collecting: boolean; lastAcceptedObservationAt?: string; unavailableReason?: string}>;
+  getStatus(): Promise<{deviceId?: string; permissionId?: string; activationId?: string; expiresAt?: string; connectionState?: string; connected: boolean; consentVerified: boolean; collecting: boolean; lastAcceptedObservationAt?: string; unavailableReason?: string}>;
 }
+export function verifiedCollectorConnection(status: Awaited<ReturnType<IosCollectorNative['getStatus']>>, consent: BoundCollectorConsent | null, now?: number): boolean;
 export function activateIosCollector(deps: {
   subject(): string | null;
   disclose(): Promise<boolean>;
@@ -21,4 +22,5 @@ export function activateIosCollector(deps: {
   readConsent(deviceId: string): Promise<BoundCollectorConsent | null>;
   grantConsent(deviceId: string): Promise<void>;
   onState(state: string): void;
+  wait?(milliseconds: number): Promise<void>;
 }): Promise<{state: string; reason?: string}>;

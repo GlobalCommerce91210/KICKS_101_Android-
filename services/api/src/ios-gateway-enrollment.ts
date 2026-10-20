@@ -69,9 +69,14 @@ export class PostgresGatewayLeaseStore implements GatewayLeaseStore {
 export type IosGatewayConfiguration = {
   environment: 'staging'; serverHost: string; serverPort: number; serverPublicKey: string;
   purpose: string; purposeVersion: string; policyVersion: string;
+  permissionId?: string;
 };
 const validKey = (key: string) => /^[A-Za-z0-9+/]{43}=$/.test(key) && Buffer.from(key, 'base64').toString('base64') === key && !Buffer.from(key, 'base64').every(b => b === 0);
 export class IosGatewayEnrollment {
+  monitoringPolicy() {
+    return this.config.permissionId ? { permissionId: this.config.permissionId, purpose: this.config.purpose,
+      purposeVersion: this.config.purposeVersion, policyVersion: this.config.policyVersion } : null;
+  }
   constructor(private readonly dependencies: { identity: ConsumerIdentityStore; bindings: ConsumerDeviceBindingStore; store: Store; leases: GatewayLeaseStore },
     private readonly config: IosGatewayConfiguration, private readonly clock = Date.now) {
     if (config.environment !== 'staging' || !validKey(config.serverPublicKey) || !/^[a-zA-Z0-9.-]+$/.test(config.serverHost) ||
@@ -81,7 +86,7 @@ export class IosGatewayEnrollment {
   private async authorized(lease: Pick<GatewayLease,'accountSubjectId'|'deviceId'|'tokenHash'|'permissionId'>) {
     const { identity, bindings, store } = this.dependencies;
     const account = await identity.findAccountBySubjectId(lease.accountSubjectId);
-    if (!account || ['closed','suspended'].includes(account.account_status)) return null;
+    if (!account || account.account_status !== 'active' || !account.email_verified) return null;
     if ((await identity.getKicksEntitlement(lease.accountSubjectId))?.status !== 'active' ||
       (await identity.getKicksProfile(lease.accountSubjectId))?.status !== 'active') return null;
     const device = await store.findDeviceByTokenHash(lease.tokenHash);
@@ -93,6 +98,7 @@ export class IosGatewayEnrollment {
       consent.purposeVersion === this.config.purposeVersion && consent.policyVersion === this.config.policyVersion ? consent : null;
   }
   async enroll(input: { accountSubjectId: string; deviceId: string; deviceToken: string; permissionId: string; publicKey: string }) {
+    if (this.config.permissionId && input.permissionId !== this.config.permissionId) throw new Error('monitoring_permission_mismatch');
     if (!validKey(input.publicKey) || input.publicKey === this.config.serverPublicKey) throw new Error('invalid_client_public_key');
     const tokenHash = createHash('sha256').update(input.deviceToken).digest('hex');
     const identity = { accountSubjectId: input.accountSubjectId, deviceId: input.deviceId, tokenHash, permissionId: input.permissionId };
