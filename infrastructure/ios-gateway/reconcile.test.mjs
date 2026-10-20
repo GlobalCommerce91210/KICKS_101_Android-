@@ -5,6 +5,17 @@ const now = Date.parse('2026-10-10T00:00:00Z');
 const peer = { publicKey: Buffer.alloc(32,1).toString('base64'), address:'10.88.0.2', addressIPv6:'fd88:4b49:434b::2',
   deviceId:'synthetic', consentId:'grant', purposeVersion:'one',authorization:'active',expiresAt:new Date(now+60_000).toISOString() };
 const snapshot = { environment:'staging',collectionEnabled:false,peers:[peer] };
+
+test('acknowledges only after host apply and clears peers when acknowledgment fails', async () => {
+  const events=[];
+  await reconcile({ readAuthority:async()=>({...snapshot,snapshotId:'a'.repeat(64)}), now:()=>now,
+    apply:async text=>events.push(text.includes('[Peer]')?'apply':'clear'),
+    acknowledge:async id=>{ assert.equal(id,'a'.repeat(64)); events.push('ack'); } });
+  assert.deepEqual(events,['apply','ack']);
+  await assert.rejects(reconcile({ readAuthority:async()=>snapshot, now:()=>now,
+    apply:async text=>events.push(text.includes('[Peer]')?'apply':'clear'), acknowledge:async()=>{throw Error('stale snapshot');} }));
+  assert.deepEqual(events.slice(-2),['apply','clear']);
+});
 test('replaces complete dual-stack peer set and empty authority removes peer', async () => {
   const writes=[]; const apply=async text=>{writes.push(text);};
   await reconcile({readAuthority:async()=>snapshot,apply,now:()=>now});

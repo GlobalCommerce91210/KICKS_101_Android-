@@ -124,7 +124,11 @@ export function IosCollectorControls({ disabled = false, onBusyChange }: { disab
             consent.purpose !== policy.purpose || consent.policyVersion !== policy.policyVersion || consent.purposeVersion !== policy.purposeVersion) {
           throw new Error('Monitoring permission is no longer active.');
         }
-        const status = await usableNative.getStatus();
+        let status = await usableNative.getStatus();
+        if (verifiedCollectorConnection(status, consent) && Date.parse(status.expiresAt ?? '') - Date.now() <= 60_000) {
+          await manager.renewIosCollectorLease({ renewLease: usableNative.renewLease!.bind(usableNative) }, policy.permissionId);
+          status = await usableNative.getStatus();
+        }
         if (manager.sessionGeneration !== generation || !verifiedCollectorConnection(status, consent)) {
           throw new Error('Collector authorization could not be verified.');
         }

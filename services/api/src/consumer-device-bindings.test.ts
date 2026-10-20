@@ -1,6 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MemoryConsumerDeviceBindingStore, DeviceOwnershipConflict } from './consumer-device-bindings.js';
+import { MemoryConsumerDeviceBindingStore, DeviceOwnershipConflict, DeviceBindingRevoked } from './consumer-device-bindings.js';
+
+test('unlink preserves ownership and cannot silently reactivate or change collector identity', async () => {
+  const store = new MemoryConsumerDeviceBindingStore();
+  const input = { subjectId: 'owner', deviceId: 'tablet', collectorSubjectId: 'collector', platform: 'ios' as const };
+  await store.bind(input);
+  await assert.rejects(store.bind({ ...input, collectorSubjectId: 'replacement' }), DeviceOwnershipConflict);
+  await assert.rejects(store.bind({ ...input, platform: 'android' }), DeviceOwnershipConflict);
+  assert.equal(await store.revoke('owner', 'tablet'), true);
+  await assert.rejects(store.bind(input), DeviceBindingRevoked);
+  await assert.rejects(store.bind({ ...input, subjectId: 'another-owner' }), DeviceOwnershipConflict);
+});
 
 test('a device has one active owner, retries preserve identity, and another account cannot revoke it', async () => {
   const store = new MemoryConsumerDeviceBindingStore();

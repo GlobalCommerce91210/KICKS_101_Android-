@@ -14,6 +14,7 @@ const env = {
   KICKS_IOS_GATEWAY_AUTHORITY_SECRET:'synthetic-separate-authority-secret-2026',
   KICKS_MONITORING_PERMISSION_ID:randomUUID(),KICKS_MONITORING_PURPOSE:'Reviewed synthetic purpose',
   KICKS_MONITORING_POLICY_VERSION:'one',KICKS_MONITORING_PURPOSE_VERSION:'one',
+  KICKS_COLLECTOR_REVOCATION_DATABASE_URL:'postgres://isolated-authority.invalid/recovery', KICKS_COLLECTOR_RECOVERY_EPOCH:randomUUID(),
 };
 test('runtime gateway requires durable staging and complete validated explicit configuration',()=>{
   assert.equal(resolveIosGatewayRuntime({},'staging'),null);
@@ -23,6 +24,7 @@ test('runtime gateway requires durable staging and complete validated explicit c
   }
   for(const change of [{KICKS_IOS_GATEWAY_PORT:'0'},{KICKS_IOS_GATEWAY_PUBLIC_KEY:Buffer.alloc(32).toString('base64')},
     {KICKS_MONITORING_PURPOSE:'x'.repeat(121)},{KICKS_MONITORING_PERMISSION_ID:'invalid'},
+    {KICKS_COLLECTOR_RECOVERY_EPOCH:'invalid'},{KICKS_COLLECTOR_REVOCATION_DATABASE_URL:env.DATABASE_URL},
     {KICKS_STAGING_ADMIN_SECRET:env.KICKS_IOS_GATEWAY_AUTHORITY_SECRET}]) {
     assert.throws(()=>resolveIosGatewayRuntime({...env,...change},'staging'));
   }

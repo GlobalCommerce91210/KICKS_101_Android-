@@ -9,6 +9,9 @@ import { Pool } from 'pg';
 import { PostgresIosDeviceProvisioner } from './ios-device-provisioning.js';
 import { resolveIosGatewayRuntime } from './ios-runtime-config.js';
 import { IosGatewayEnrollment, PostgresGatewayLeaseStore } from './ios-gateway-enrollment.js';
+import { PostgresCollectorRecoveryAuthority } from './collector-recovery.js';
+import { batchDigest } from './batch-digest.js';
+import { BatchConflict, BatchConsentRequired } from './store.js';
 import { endpointBySignatureId } from './endpoint-intelligence.js';
 import { InverseGrowthEngine } from './inverse-growth.js';
 import { InversePricingEngine } from './inverse-pricing.js';
@@ -210,9 +213,11 @@ export function buildServer(options: {
   const iosDeviceProvisioner = options.iosDeviceProvisioner ?? (iosProvisioningPool ? new PostgresIosDeviceProvisioner(iosProvisioningPool) : undefined);
   const gatewayRuntime = options.iosGateway ? null : resolveIosGatewayRuntime(process.env, environment);
   const gatewayPool = gatewayRuntime ? new Pool({ connectionString: databaseUrl }) : null;
+  const recoveryPool = gatewayRuntime ? new Pool({ connectionString: process.env.KICKS_COLLECTOR_REVOCATION_DATABASE_URL }) : null;
+  const recovery = recoveryPool ? new PostgresCollectorRecoveryAuthority(recoveryPool) : undefined;
   const iosGateway = options.iosGateway ?? (gatewayRuntime && gatewayPool ? {
     enrollment: new IosGatewayEnrollment({ identity: identityStore, bindings: deviceBindingStore, store,
-      leases: new PostgresGatewayLeaseStore(gatewayPool) }, gatewayRuntime.config),
+      leases: new PostgresGatewayLeaseStore(gatewayPool), recovery }, gatewayRuntime.config),
     authenticateAuthority: async (authorization?: string) => safeEqual(hash(authorization ?? ''), hash('Bearer ' + gatewayRuntime.secret)),
   } : undefined);
   const app = Fastify({
@@ -235,7 +240,7 @@ export function buildServer(options: {
     return payload;
   });
   app.addHook('onClose', async () => {
-    await Promise.all([store.close(), identityStore.close(), deviceBindingStore.close(), iosProvisioningPool?.end(), gatewayPool?.end()]);
+    await Promise.all([store.close(), identityStore.close(), deviceBindingStore.close(), iosProvisioningPool?.end(), gatewayPool?.end(), recoveryPool?.end()]);
   });
 
   app.get('/health', async () => ({
@@ -440,7 +445,7 @@ export function buildServer(options: {
       correlationId: request.id,
     };
 
-    await store.appendConsent(event);
+    await store.appendConsent(event, iosGateway ? current => iosGateway.enrollment.beforeConsent(device.id, device.subjectId, event.permissionId, event.action, current) : undefined);
     await audit({
       actorId: device.subjectId,
       action: `consent.${parsed.data.action}`,
@@ -481,8 +486,8 @@ export function buildServer(options: {
         outcome: 'rejected', correlationId: request.id, metadata: { reason: 'non_minimized' } });
       return reply.code(400).send({ error: 'invalid_or_non_minimized_metadata', issues: parsed.error.issues });
     }
-    if (await store.hasBatch(parsed.data.batchId)) return reply.code(409).send({ error: 'replay_detected' });
     for (const item of parsed.data.observations) {
+      await iosGateway?.enrollment.assertActivation(device.id, item.consentId);
       const consent = await store.consentByActivationId(device.id, item.consentId);
       const current = consent ? await store.currentConsent(device.id, device.subjectId, consent.permissionId) : null;
       if (!consent || !current || current.id !== consent.id || consent.action !== 'grant' || consent.purpose !== item.consentPurpose) {
@@ -526,12 +531,19 @@ export function buildServer(options: {
       appVersionName: item.appVersionName ?? null,
       appVersionCode: item.appVersionCode ?? null,
     }));
-    await store.appendBatch({ batchId: parsed.data.batchId, deviceId: device.id,
-      schemaVersion: parsed.data.schemaVersion, observations });
-    await audit({ actorId: device.subjectId, action: 'metadata.ingest', targetType: 'batch',
-      targetId: parsed.data.batchId, outcome: 'accepted', correlationId: request.id,
-      metadata: { count: parsed.data.observations.length } });
-    return reply.code(202).send({ batchId: parsed.data.batchId, accepted: parsed.data.observations.length });
+    let receipt;
+    try {
+      receipt = await store.appendBatch({ batchId: parsed.data.batchId, deviceId: device.id,
+        schemaVersion: parsed.data.schemaVersion, observations, payloadDigest: batchDigest(request.body),
+        audit: { id: randomUUID(), actorId: device.subjectId, action: 'metadata.ingest', targetType: 'batch',
+          targetId: parsed.data.batchId, outcome: 'accepted', occurredAt: new Date().toISOString(), correlationId: request.id,
+          metadata: { count: observations.length } } });
+    } catch (error) {
+      if (error instanceof BatchConflict) return reply.code(409).send({ error: 'batch_identity_conflict' });
+      if (error instanceof BatchConsentRequired) return reply.code(403).send({ error: 'active_purpose_consent_required' });
+      throw error;
+    }
+    return reply.code(receipt.replayed ? 200 : 202).send(receipt);
   });
 
   app.post('/v1/collection-events', async (request, reply) => {

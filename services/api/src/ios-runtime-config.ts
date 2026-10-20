@@ -8,8 +8,16 @@ export function resolveIosGatewayRuntime(env: NodeJS.ProcessEnv, environment: 's
   }
   const required = ['KICKS_IOS_GATEWAY_HOST', 'KICKS_IOS_GATEWAY_PORT', 'KICKS_IOS_GATEWAY_PUBLIC_KEY',
     'KICKS_IOS_GATEWAY_AUTHORITY_SECRET', 'KICKS_MONITORING_PERMISSION_ID', 'KICKS_MONITORING_PURPOSE',
-    'KICKS_MONITORING_PURPOSE_VERSION', 'KICKS_MONITORING_POLICY_VERSION'] as const;
+    'KICKS_MONITORING_PURPOSE_VERSION', 'KICKS_MONITORING_POLICY_VERSION',
+    'KICKS_COLLECTOR_REVOCATION_DATABASE_URL', 'KICKS_COLLECTOR_RECOVERY_EPOCH'] as const;
   for (const name of required) if (!env[name]?.trim()) throw new Error(`Missing ${name}`);
+  const primary = new URL((env.DATABASE_URL ?? env.KICKS_DATABASE_URL)!);
+  const authority = new URL(env.KICKS_COLLECTOR_REVOCATION_DATABASE_URL!);
+  if (!['postgres:', 'postgresql:'].includes(authority.protocol) ||
+      (primary.hostname === authority.hostname && primary.port === authority.port && primary.pathname === authority.pathname)) {
+    throw new Error('Separate collector recovery database required');
+  }
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(env.KICKS_COLLECTOR_RECOVERY_EPOCH!)) throw new Error('Invalid recovery epoch');
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(env.KICKS_MONITORING_PERMISSION_ID!)) throw new Error('Invalid monitoring permission ID');
   const key = env.KICKS_IOS_GATEWAY_PUBLIC_KEY!;
   const port = Number(env.KICKS_IOS_GATEWAY_PORT);
@@ -27,6 +35,7 @@ export function resolveIosGatewayRuntime(env: NodeJS.ProcessEnv, environment: 's
     serverPublicKey: env.KICKS_IOS_GATEWAY_PUBLIC_KEY!, purpose: env.KICKS_MONITORING_PURPOSE!,
     purposeVersion: env.KICKS_MONITORING_PURPOSE_VERSION!, policyVersion: env.KICKS_MONITORING_POLICY_VERSION!,
     permissionId: env.KICKS_MONITORING_PERMISSION_ID!,
+    recoveryEpoch: env.KICKS_COLLECTOR_RECOVERY_EPOCH!,
   };
   return { config, secret, permissionId: env.KICKS_MONITORING_PERMISSION_ID! };
 }

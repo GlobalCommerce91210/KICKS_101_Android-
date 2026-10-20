@@ -5,13 +5,15 @@ import { buildServer, memoryStore } from './server.js';
 import { MemoryConsumerIdentityStore } from './consumer-identity.js';
 import { MemoryConsumerDeviceBindingStore } from './consumer-device-bindings.js';
 import { IosGatewayEnrollment, MemoryGatewayLeaseStore } from './ios-gateway-enrollment.js';
+import { MemoryCollectorRecoveryAuthority } from './collector-recovery.js';
 
 test('staging leases require account ownership, native device proof and current exact consent; authority excludes revocation and expiry', async t => {
   const store=memoryStore(); const identity=new MemoryConsumerIdentityStore(); const bindings=new MemoryConsumerDeviceBindingStore();
   let now=Date.now();
   const config={environment:'staging' as const,serverHost:'gateway.example.test',serverPort:51820,serverPublicKey:Buffer.alloc(32,7).toString('base64'),
     purpose:'Detect unexpected data destinations',purposeVersion:'network-safety-1',policyVersion:'privacy-1'};
-  const enrollment=new IosGatewayEnrollment({identity,bindings,store,leases:new MemoryGatewayLeaseStore()},config,()=>now);
+  const epoch = randomUUID(); const recovery = new MemoryCollectorRecoveryAuthority(epoch);
+  const enrollment=new IosGatewayEnrollment({identity,bindings,store,leases:new MemoryGatewayLeaseStore(), recovery},{...config,recoveryEpoch:epoch},()=>now);
   const app=buildServer({store,consumerIdentityStore:identity,consumerDeviceBindingStore:bindings,adminSecret:'synthetic-admin',
     iosGateway:{enrollment,authenticateAuthority:async authorization=>authorization==='Bearer synthetic-authority'}});
   t.after(()=>app.close());
@@ -48,6 +50,25 @@ test('staging leases require account ownership, native device proof and current 
   assert.equal((await app.inject({url:authorityUrl,headers})).statusCode,401);
   const peerSet=await app.inject({url:authorityUrl,headers:{authorization:'Bearer synthetic-authority'}});
   assert.equal(peerSet.json().peers.length,1); assert.doesNotMatch(peerSet.body,/tokenHash|accountSubjectId|deviceToken/);
+  assert.equal((await enrollment.status(account.json().account.subject_id,deviceId)).ready,false);
+  await enrollment.acknowledge(peerSet.json().snapshotId);
+  assert.equal((await enrollment.status(account.json().account.subject_id,deviceId)).ready,true);
+  now += 11_000;
+  assert.equal((await enrollment.status(account.json().account.subject_id,deviceId)).ready,false);
+  const renewed = await app.inject({method:'POST',url:leaseUrl,headers,payload:input});
+  assert.notEqual(renewed.json().revision, repeat.json().revision);
+  await assert.rejects(enrollment.acknowledge(peerSet.json().snapshotId), /snapshot_changed/);
+  recovery.held = true;
+  await assert.rejects(enrollment.peers(), /recovery_hold/);
+  recovery.held = false;
+  recovery.epoch = randomUUID();
+  await assert.rejects(enrollment.peers(), /recovery_hold/);
+  recovery.epoch = epoch;
+  // A revocation in the independent authority defeats an older primary grant.
+  await recovery.revoke(deviceId, grant.json().activationId);
+  assert.equal((await enrollment.peers()).peers.length,0);
+  assert.equal((await enrollment.status(account.json().account.subject_id,deviceId)).ready,false);
+  await assert.rejects(enrollment.assertActivation(deviceId,grant.json().activationId),/activation_revoked/);
   await app.inject({method:'POST',url:`/core/consumer/v1/devices/${deviceId}/consent`,headers,payload:{...consent,activationRequestId:randomUUID(),action:'revoke'}});
   assert.equal((await enrollment.peers()).peers.length,0);
   assert.equal((await app.inject({method:'POST',url:leaseUrl,headers,payload:input})).statusCode,403);

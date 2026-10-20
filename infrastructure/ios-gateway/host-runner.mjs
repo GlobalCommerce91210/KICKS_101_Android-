@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { posix, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
-import { httpsAuthorityReader, reconcile } from './reconcile.mjs';
+import { httpsAuthorityReader, httpsAuthorityAcknowledger, reconcile } from './reconcile.mjs';
 
 export const gatewayInterface = 'kicks-staging';
 const executeFile = promisify(execFile);
@@ -53,7 +53,7 @@ export async function clearHostPeers({ apply, run = execute }) {
   }
 }
 
-export async function runGatewayLoop({ readAuthority, apply, notify = async () => {}, signal,
+export async function runGatewayLoop({ readAuthority, apply, acknowledge, notify = async () => {}, signal,
   pause = ms => delay(ms, undefined, { signal }), now = Date.now }) {
   // Never inherit peers from a previous runner or stale saved configuration.
   await apply(emptyPeers);
@@ -69,7 +69,7 @@ export async function runGatewayLoop({ readAuthority, apply, notify = async () =
           throw new Error('lease_renewal_required');
         return snapshot;
       };
-      await reconcile({ readAuthority: readWithSafetyMargin, apply, now });
+      await reconcile({ readAuthority: readWithSafetyMargin, apply, acknowledge, now });
       if (!ready) { await notify('ready'); ready = true; }
       await notify('watchdog'); // only after authority validation and host apply
       await pause(1000);
@@ -95,8 +95,9 @@ async function main() {
   const controller = new AbortController();
   process.once('SIGTERM', () => controller.abort()); process.once('SIGINT', () => controller.abort());
   const readAuthority = httpsAuthorityReader({ url, authorization, signal: controller.signal });
+  const acknowledge = httpsAuthorityAcknowledger({ url, authorization, signal: controller.signal });
   const notify = state => execute('/usr/bin/systemd-notify', [state === 'ready' ? '--ready' : 'WATCHDOG=1']);
-  await runGatewayLoop({ readAuthority, apply, notify, signal: controller.signal });
+  await runGatewayLoop({ readAuthority, apply, acknowledge, notify, signal: controller.signal });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

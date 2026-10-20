@@ -14,7 +14,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private let stateQueue = DispatchQueue(label: "com.datastorm.kicks.tunnel-state")
 
     private struct Lease: Decodable {
-        struct WireGuard: Decodable {
+        struct WireGuard: Decodable, Equatable {
             let privateKey: String
             let serverPublicKey: String
             let serverPort: UInt16
@@ -25,6 +25,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         let deviceId: String
         let permissionId: String
         let activationId: String
+        let revision: String
+        let recoveryEpoch: String
         let tunnelServerHost: String
         let expiresAt: Date
         let wireguard: WireGuard
@@ -46,9 +48,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         let lease = try decoder.decode(Lease.self, from: data)
         guard UUID(uuidString: lease.deviceId) != nil, UUID(uuidString: lease.permissionId) != nil,
               UUID(uuidString: lease.activationId) != nil,
+              UUID(uuidString: lease.revision) != nil, UUID(uuidString: lease.recoveryEpoch) != nil,
               settings.providerConfiguration?["deviceId"] as? String == lease.deviceId,
               settings.providerConfiguration?["permissionId"] as? String == lease.permissionId,
               settings.providerConfiguration?["activationId"] as? String == lease.activationId,
+              settings.providerConfiguration?["recoveryEpoch"] as? String == lease.recoveryEpoch,
               settings.serverAddress == lease.tunnelServerHost,
               lease.expiresAt > Date(), lease.expiresAt.timeIntervalSinceNow <= 300 else {
             throw Failure.invalidEnrollment
@@ -100,19 +104,24 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                         return
                     }
                     self.lease = verifiedLease
-                    let timer = DispatchSource.makeTimerSource(queue: self.stateQueue)
-                    timer.schedule(deadline: .now() + verifiedLease.expiresAt.timeIntervalSinceNow)
-                    timer.setEventHandler { [weak self] in
-                        guard let self else { return }
-                        self.lease = nil
-                        self.adapter.stop { _ in self.cancelTunnelWithError(Failure.invalidEnrollment) }
-                    }
-                    self.expiryTimer = timer
-                    timer.resume()
+                    self.armExpiry(verifiedLease)
                     completionHandler(nil)
                 }
             }
         } catch { completionHandler(error) }
+    }
+
+    private func armExpiry(_ lease: Lease) {
+        expiryTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: stateQueue)
+        timer.schedule(deadline: .now() + lease.expiresAt.timeIntervalSinceNow)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.lease = nil
+            self.adapter.stop { _ in self.cancelTunnelWithError(Failure.invalidEnrollment) }
+        }
+        expiryTimer = timer
+        timer.resume()
     }
 
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
@@ -125,13 +134,25 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
-        guard messageData == Data("status-v1".utf8) else { completionHandler?(nil); return }
+        let renew = messageData == Data("renew-v1".utf8)
+        guard renew || messageData == Data("status-v1".utf8) else { completionHandler?(nil); return }
         stateQueue.async {
+            if renew {
+                guard let current = self.lease, current.expiresAt > Date(),
+                      let next = try? self.readLease(), next.deviceId == current.deviceId,
+                      next.permissionId == current.permissionId, next.activationId == current.activationId,
+                      next.recoveryEpoch == current.recoveryEpoch, next.revision != current.revision,
+                      next.tunnelServerHost == current.tunnelServerHost, next.wireguard == current.wireguard,
+                      next.expiresAt > current.expiresAt else { completionHandler?(nil); return }
+                self.lease = next
+                self.armExpiry(next)
+            }
             // Never return a key, raw WireGuard configuration, or a false collecting claim.
             let valid = self.lease.map { $0.expiresAt > Date() } ?? false
             let status: [String: Any] = ["deviceId": self.lease?.deviceId ?? "",
                 "permissionId": self.lease?.permissionId ?? "", "collecting": false,
                 "activationId": self.lease?.activationId ?? "",
+                "revision": self.lease?.revision ?? "", "recoveryEpoch": self.lease?.recoveryEpoch ?? "",
                 "expiresAt": self.lease.map { ISO8601DateFormatter().string(from: $0.expiresAt) } ?? "",
                 "consentVerified": valid, "transportConfigured": valid]
             completionHandler?(try? JSONSerialization.data(withJSONObject: status))

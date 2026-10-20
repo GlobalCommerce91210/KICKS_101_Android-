@@ -15,6 +15,7 @@ public final class KicksTunnelModule: Module {
         }
         AsyncFunction("renewLease") { (accountBearer: String, permissionId: String) async throws in
             try await self.enrollment.renewLease(bearer: accountBearer, permissionId: permissionId)
+            try await self.controller.refreshLease()
         }
         AsyncFunction("getDeviceId") { () async throws -> String in
             try await self.enrollment.enrolledDeviceId()
@@ -41,6 +42,8 @@ private struct NativeConfiguration: Decodable {
     let deviceId: String
     let permissionId: String
     let activationId: String
+    let revision: String
+    let recoveryEpoch: String
     let tunnelServerHost: String
     let expiresAt: Date
 }
@@ -233,6 +236,8 @@ private actor NativeEnrollment {
         guard lease["deviceId"] as? String == existing.deviceId,
               lease["permissionId"] as? String == permissionId,
               let activation = lease["activationId"] as? String, UUID(uuidString: activation) != nil,
+              let revision = lease["revision"] as? String, UUID(uuidString: revision) != nil,
+              let recoveryEpoch = lease["recoveryEpoch"] as? String, UUID(uuidString: recoveryEpoch) != nil,
               lease["collectionEnabled"] as? Bool == false,
               let expiry, expiry > Date(), expiry.timeIntervalSinceNow <= 300,
               let host = lease["tunnelServerHost"] as? String, !host.isEmpty,
@@ -243,6 +248,24 @@ private actor NativeEnrollment {
               wireguard["addressIPv4"] is String, wireguard["addressIPv6"] is String,
               let dns = wireguard["dnsServers"] as? [String], !dns.isEmpty else {
             throw failure("The gateway authorization is incomplete or does not match this iPad’s grant.")
+        }
+        // A persisted API lease is insufficient: the fixed gateway must acknowledge
+        // this exact revision, activation and recovery epoch before we save it.
+        var applied = false
+        for _ in 0..<5 {
+            let status = try await request("/core/consumer/v1/devices/\(existing.deviceId)/ios-gateway-status", bearer: bearer, body: [:])
+            if status["ready"] as? Bool == true,
+               status["revision"] as? String == revision,
+               status["recoveryEpoch"] as? String == recoveryEpoch,
+               status["activationId"] as? String == activation,
+               status["expiresAt"] as? String == expiryString {
+                applied = true
+                break
+            }
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        guard applied, expiry > Date() else {
+            throw failure("The gateway has not confirmed this iPad’s current authorization. Please retry after setup is ready.")
         }
         // Never trust an upstream response to supply or replace a device private key.
         wireguard["privateKey"] = existing.privateKey
@@ -353,7 +376,8 @@ private final class KicksTunnelController {
         // Only a Keychain reference crosses into the OS profile, never a token.
         settings.passwordReference = try readKeychain(reference: true)
         settings.providerConfiguration = ["schemaVersion": 1, "deviceId": config.deviceId,
-                                          "permissionId": config.permissionId, "activationId": config.activationId]
+                                          "permissionId": config.permissionId, "activationId": config.activationId,
+                                          "recoveryEpoch": config.recoveryEpoch]
         profile.protocolConfiguration = settings
         profile.localizedDescription = "KICK’S"
         profile.isEnabled = true
@@ -399,6 +423,30 @@ private final class KicksTunnelController {
         throw CollectorFailure(message: "Collector stop could not be confirmed. Turn off KICK’S VPN in iOS Settings.")
     }
 
+    func refreshLease() async throws {
+        let profiles = try await managers()
+        if profiles.allSatisfy({ [.disconnected, .invalid].contains($0.connection.status) }) { return }
+        guard profiles.count == 1, let profile = profiles.first, profile.connection.status == .connected,
+              let session = profile.connection as? NETunnelProviderSession else {
+            throw CollectorFailure(message: "The collector must be connected before its lease can be renewed.")
+        }
+        let data: Data? = await withCheckedContinuation { continuation in
+            let reply = TunnelStatusReply(continuation)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3) { reply.finish(nil) }
+            do { try session.sendProviderMessage(Data("renew-v1".utf8)) { reply.finish($0) } }
+            catch { reply.finish(nil) }
+        }
+        let config = try configuration()
+        guard let data, data.count <= 4096,
+              let evidence = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              evidence["revision"] as? String == config.revision,
+              evidence["recoveryEpoch"] as? String == config.recoveryEpoch,
+              evidence["activationId"] as? String == config.activationId,
+              evidence["expiresAt"] as? String == ISO8601DateFormatter().string(from: config.expiresAt) else {
+            throw CollectorFailure(message: "The extension could not confirm the renewed authorization.")
+        }
+    }
+
     func status() async throws -> [String: Any] {
         let profiles = try await managers()
         // Transitional states remain active for stop verification, but are never authorized.
@@ -424,6 +472,8 @@ private final class KicksTunnelController {
               evidence["deviceId"] as? String == config.deviceId,
               evidence["permissionId"] as? String == config.permissionId,
               evidence["activationId"] as? String == config.activationId,
+              evidence["revision"] as? String == config.revision,
+              evidence["recoveryEpoch"] as? String == config.recoveryEpoch,
               evidence["expiresAt"] as? String == ISO8601DateFormatter().string(from: config.expiresAt),
               evidence["transportConfigured"] as? Bool == true,
               evidence["consentVerified"] as? Bool == true,
