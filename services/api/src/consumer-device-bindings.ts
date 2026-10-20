@@ -1,6 +1,13 @@
 ﻿import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 
+export class DeviceOwnershipConflict extends Error {
+  constructor() { super('device_already_linked'); }
+}
+export class DeviceBindingRevoked extends Error {
+  constructor() { super('device_binding_revoked'); }
+}
+
 export interface ConsumerDeviceBinding {
   binding_id: string;
   subject_id: string;
@@ -53,10 +60,19 @@ implements ConsumerDeviceBindingStore {
     const key = `${input.subjectId}:${input.deviceId}`;
     const existing = this.bindings.get(key);
 
-    if (existing?.status === 'active') return clone(existing);
+    if ([...this.bindings.values()].some(binding => binding.device_id === input.deviceId &&
+      binding.subject_id !== input.subjectId)) {
+      throw new DeviceOwnershipConflict();
+    }
+
+    if (existing?.status === 'revoked') throw new DeviceBindingRevoked();
+    if (existing) {
+      if (existing.collector_subject_id !== input.collectorSubjectId || existing.platform !== (input.platform ?? 'android')) throw new DeviceOwnershipConflict();
+      return clone(existing);
+    }
 
     const binding: ConsumerDeviceBinding = {
-      binding_id: existing?.binding_id ?? `bind_${randomUUID()}`,
+      binding_id: `bind_${randomUUID()}`,
       subject_id: input.subjectId,
       device_id: input.deviceId,
       collector_subject_id: input.collectorSubjectId,
@@ -158,6 +174,11 @@ implements ConsumerDeviceBindingStore {
 
       CREATE INDEX IF NOT EXISTS idx_consumer_device_bindings_device
         ON consumer_device_bindings(device_id);
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_consumer_device_single_owner
+        ON consumer_device_bindings(device_id) WHERE status='active';
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_consumer_device_owner_history
+        ON consumer_device_bindings(device_id);
     `);
   }
 
@@ -173,7 +194,19 @@ implements ConsumerDeviceBindingStore {
 
     const now = new Date().toISOString();
 
-    const result = await this.pool.query(
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('device_owner:' || $1))", [input.deviceId]);
+      const history = await client.query('SELECT * FROM consumer_device_bindings WHERE device_id=$1 FOR UPDATE', [input.deviceId]);
+      if (history.rows.length) {
+        const existing = history.rows[0];
+        if (history.rows.length !== 1 || existing.subject_id !== input.subjectId || existing.collector_subject_id !== input.collectorSubjectId ||
+          existing.platform !== (input.platform ?? 'android')) throw new DeviceOwnershipConflict();
+        if (existing.status !== 'active') throw new DeviceBindingRevoked();
+        await client.query('COMMIT'); return mapBinding(existing);
+      }
+      const result = await client.query(
       `INSERT INTO consumer_device_bindings(
         binding_id,
         subject_id,
@@ -187,15 +220,6 @@ implements ConsumerDeviceBindingStore {
         revoked_at
       )
       VALUES($1,$2,$3,$4,'active',$5,$6,$7,$8,NULL)
-      ON CONFLICT(subject_id, device_id)
-      DO UPDATE SET
-        collector_subject_id=EXCLUDED.collector_subject_id,
-        status='active',
-        display_name=EXCLUDED.display_name,
-        platform=EXCLUDED.platform,
-        app_version=EXCLUDED.app_version,
-        bound_at=EXCLUDED.bound_at,
-        revoked_at=NULL
       RETURNING *`,
       [
         `bind_${randomUUID()}`,
@@ -208,8 +232,15 @@ implements ConsumerDeviceBindingStore {
         now,
       ],
     );
-
-    return mapBinding(result.rows[0]);
+      await client.query('COMMIT'); return mapBinding(result.rows[0]);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      if ((error as { code?: string; constraint?: string }).code === '23505' &&
+          ['idx_consumer_device_single_owner', 'idx_consumer_device_owner_history'].includes((error as { constraint?: string }).constraint ?? '')) {
+        throw new DeviceOwnershipConflict();
+      }
+      throw error;
+    } finally { client.release(); }
   }
 
   async list(subjectId: string): Promise<ConsumerDeviceBinding[]> {

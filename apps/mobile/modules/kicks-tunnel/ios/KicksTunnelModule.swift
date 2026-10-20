@@ -15,6 +15,7 @@ public final class KicksTunnelModule: Module {
         }
         AsyncFunction("renewLease") { (accountBearer: String, permissionId: String) async throws in
             try await self.enrollment.renewLease(bearer: accountBearer, permissionId: permissionId)
+            try await self.controller.refreshLease()
         }
         AsyncFunction("getDeviceId") { () async throws -> String in
             try await self.enrollment.enrolledDeviceId()
@@ -40,6 +41,9 @@ public final class KicksTunnelModule: Module {
 private struct NativeConfiguration: Decodable {
     let deviceId: String
     let permissionId: String
+    let activationId: String
+    let revision: String
+    let recoveryEpoch: String
     let tunnelServerHost: String
     let expiresAt: Date
 }
@@ -232,6 +236,8 @@ private actor NativeEnrollment {
         guard lease["deviceId"] as? String == existing.deviceId,
               lease["permissionId"] as? String == permissionId,
               let activation = lease["activationId"] as? String, UUID(uuidString: activation) != nil,
+              let revision = lease["revision"] as? String, UUID(uuidString: revision) != nil,
+              let recoveryEpoch = lease["recoveryEpoch"] as? String, UUID(uuidString: recoveryEpoch) != nil,
               lease["collectionEnabled"] as? Bool == false,
               let expiry, expiry > Date(), expiry.timeIntervalSinceNow <= 300,
               let host = lease["tunnelServerHost"] as? String, !host.isEmpty,
@@ -242,6 +248,34 @@ private actor NativeEnrollment {
               wireguard["addressIPv4"] is String, wireguard["addressIPv6"] is String,
               let dns = wireguard["dnsServers"] as? [String], !dns.isEmpty else {
             throw failure("The gateway authorization is incomplete or does not match this iPad’s grant.")
+        }
+        // A persisted API lease is insufficient: the fixed gateway must acknowledge
+        // this exact revision, activation and recovery epoch before we save it.
+        var applied = false
+        var gatewayMessage = "The gateway has not confirmed this iPad’s current authorization. Please retry after setup is ready."
+        for _ in 0..<5 {
+            let status = try await request("/core/consumer/v1/devices/\(existing.deviceId)/ios-gateway-status", bearer: bearer, body: [:])
+            switch status["reason"] as? String {
+            case "recovery_hold", "recovery_epoch_mismatch":
+                gatewayMessage = "Monitoring is paused for a recovery check. Your existing enrollment has been preserved."
+            case "recovery_authority_unavailable", "lease_store_unavailable", "authorization_unavailable":
+                gatewayMessage = "The authorization service is unavailable. Your existing enrollment has been preserved. Please retry later."
+            case "authorization_inactive":
+                gatewayMessage = "Monitoring permission is no longer active. Review your permission before reconnecting."
+            default: break
+            }
+            if status["ready"] as? Bool == true,
+               status["revision"] as? String == revision,
+               status["recoveryEpoch"] as? String == recoveryEpoch,
+               status["activationId"] as? String == activation,
+               status["expiresAt"] as? String == expiryString {
+                applied = true
+                break
+            }
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        guard applied, expiry > Date() else {
+            throw failure(gatewayMessage)
         }
         // Never trust an upstream response to supply or replace a device private key.
         wireguard["privateKey"] = existing.privateKey
@@ -298,6 +332,7 @@ private final class KicksTunnelController {
         do { config = try decoder.decode(NativeConfiguration.self, from: readKeychain()) }
         catch { throw CollectorFailure(message: "The native enrollment must include a device binding and expiring authorization. Existing credentials were preserved.") }
         guard UUID(uuidString: config.deviceId) != nil, UUID(uuidString: config.permissionId) != nil,
+              UUID(uuidString: config.activationId) != nil,
               !config.tunnelServerHost.isEmpty,
               config.expiresAt > Date(), config.expiresAt.timeIntervalSinceNow <= 300 else {
             throw CollectorFailure(message: "The collector enrollment is incomplete or expired. Monitoring remains off.")
@@ -351,13 +386,20 @@ private final class KicksTunnelController {
         // Only a Keychain reference crosses into the OS profile, never a token.
         settings.passwordReference = try readKeychain(reference: true)
         settings.providerConfiguration = ["schemaVersion": 1, "deviceId": config.deviceId,
-                                          "permissionId": config.permissionId]
+                                          "permissionId": config.permissionId, "activationId": config.activationId,
+                                          "recoveryEpoch": config.recoveryEpoch]
         profile.protocolConfiguration = settings
         profile.localizedDescription = "KICK’S"
         profile.isEnabled = true
         profile.isOnDemandEnabled = false
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             profile.saveToPreferences { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            profile.loadFromPreferences { error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume() }
             }
@@ -373,6 +415,7 @@ private final class KicksTunnelController {
               let settings = profile.protocolConfiguration as? NETunnelProviderProtocol,
               settings.providerConfiguration?["deviceId"] as? String == config.deviceId,
               settings.providerConfiguration?["permissionId"] as? String == config.permissionId,
+              settings.providerConfiguration?["activationId"] as? String == config.activationId,
               settings.passwordReference == (try readKeychain(reference: true)),
               let session = profile.connection as? NETunnelProviderSession else {
             throw CollectorFailure(message: "The VPN profile does not match this iPad’s current enrollment.")
@@ -390,15 +433,78 @@ private final class KicksTunnelController {
         throw CollectorFailure(message: "Collector stop could not be confirmed. Turn off KICK’S VPN in iOS Settings.")
     }
 
+    func refreshLease() async throws {
+        let profiles = try await managers()
+        if profiles.allSatisfy({ [.disconnected, .invalid].contains($0.connection.status) }) { return }
+        guard profiles.count == 1, let profile = profiles.first, profile.connection.status == .connected,
+              let session = profile.connection as? NETunnelProviderSession else {
+            throw CollectorFailure(message: "The collector must be connected before its lease can be renewed.")
+        }
+        let data: Data? = await withCheckedContinuation { continuation in
+            let reply = TunnelStatusReply(continuation)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3) { reply.finish(nil) }
+            do { try session.sendProviderMessage(Data("renew-v1".utf8)) { reply.finish($0) } }
+            catch { reply.finish(nil) }
+        }
+        let config = try configuration()
+        guard let data, data.count <= 4096,
+              let evidence = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              evidence["revision"] as? String == config.revision,
+              evidence["recoveryEpoch"] as? String == config.recoveryEpoch,
+              evidence["activationId"] as? String == config.activationId,
+              evidence["expiresAt"] as? String == ISO8601DateFormatter().string(from: config.expiresAt) else {
+            throw CollectorFailure(message: "The extension could not confirm the renewed authorization.")
+        }
+    }
+
     func status() async throws -> [String: Any] {
         let profiles = try await managers()
-        let connected = profiles.contains { [.connected, .connecting, .reasserting, .disconnecting].contains($0.connection.status) }
-        // OS connectivity is insufficient to assert verified consent or ingestion.
-        // The extension evidence protocol must be implemented before enabling this.
-        return ["deviceId": (try? configuration().deviceId) ?? "",
-                "permissionId": (try? configuration().permissionId) ?? "",
-                "connected": connected, "consentVerified": false, "collecting": false,
-                "unavailableReason": "Native collection verification is unavailable in this build. Request a verified staging extension from support. Collection remains off."]
+        // Transitional states remain active for stop verification, but are never authorized.
+        let active = profiles.contains { ![.disconnected, .invalid].contains($0.connection.status) }
+        let unavailable: [String: Any] = ["connected": active, "consentVerified": false, "collecting": false,
+            "connectionState": profiles.first.map { String(describing: $0.connection.status) } ?? "disconnected"]
+        guard profiles.count == 1, let profile = profiles.first,
+              profile.connection.status == .connected, let config = try? configuration(),
+              let settings = profile.protocolConfiguration as? NETunnelProviderProtocol,
+              settings.providerConfiguration?["deviceId"] as? String == config.deviceId,
+              settings.providerConfiguration?["permissionId"] as? String == config.permissionId,
+              settings.providerConfiguration?["activationId"] as? String == config.activationId,
+              let reference = try? readKeychain(reference: true), settings.passwordReference == reference,
+              let session = profile.connection as? NETunnelProviderSession else { return unavailable }
+        let data: Data? = await withCheckedContinuation { continuation in
+            let reply = TunnelStatusReply(continuation)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3) { reply.finish(nil) }
+            do { try session.sendProviderMessage(Data("status-v1".utf8)) { reply.finish($0) } }
+            catch { reply.finish(nil) }
+        }
+        guard let data, data.count <= 4096,
+              let evidence = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              evidence["deviceId"] as? String == config.deviceId,
+              evidence["permissionId"] as? String == config.permissionId,
+              evidence["activationId"] as? String == config.activationId,
+              evidence["revision"] as? String == config.revision,
+              evidence["recoveryEpoch"] as? String == config.recoveryEpoch,
+              evidence["expiresAt"] as? String == ISO8601DateFormatter().string(from: config.expiresAt),
+              evidence["transportConfigured"] as? Bool == true,
+              evidence["consentVerified"] as? Bool == true,
+              config.expiresAt > Date(), profile.connection.status == .connected else { return unavailable }
+        // This proves the extension's bounded lease and transport, never ingestion.
+        return ["deviceId": config.deviceId, "permissionId": config.permissionId,
+                "activationId": config.activationId, "expiresAt": ISO8601DateFormatter().string(from: config.expiresAt),
+                "connected": true, "consentVerified": true, "collecting": false]
+    }
+}
+
+private final class TunnelStatusReply: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Data?, Never>?
+    init(_ continuation: CheckedContinuation<Data?, Never>) { self.continuation = continuation }
+    func finish(_ data: Data?) {
+        lock.lock()
+        let pending = continuation
+        continuation = nil
+        lock.unlock()
+        pending?.resume(returning: data)
     }
 }
 

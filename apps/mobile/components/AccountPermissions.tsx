@@ -5,16 +5,14 @@ import { router } from 'expo-router';
 import { BrandHeader, Card, Screen, colors, ui } from './Brand';
 import { useSession } from './SessionProvider';
 import { SessionError } from '../services/sessionCore';
+import { useMonitoringPolicy } from './useMonitoringPolicy';
 
 interface Device { device_id: string; display_name: string | null; platform: string; }
 interface Consent { action: 'grant' | 'deny' | 'revoke'; purpose: string; permissionId: string; policyVersion: string; purposeVersion: string; occurredAt: string; }
-const permissionId = process.env.EXPO_PUBLIC_MONITORING_PERMISSION_ID;
-const policyVersion = process.env.EXPO_PUBLIC_MONITORING_POLICY_VERSION;
-const purposeVersion = process.env.EXPO_PUBLIC_MONITORING_PURPOSE_VERSION;
-const purpose = process.env.EXPO_PUBLIC_MONITORING_PURPOSE;
-const configured = !!(permissionId && policyVersion && purposeVersion && purpose);
 export function AccountPermissions() {
   const { manager, user, ready, sessionWarning } = useSession();
+  const { policy, configured } = useMonitoringPolicy();
+  const { permissionId, policyVersion, purposeVersion, purpose } = policy;
   const [devices, setDevices] = useState<Device[]>([]);
   const [deviceId, setDeviceId] = useState('');
   const [consent, setConsent] = useState<Consent | null>(null);
@@ -51,7 +49,7 @@ export function AccountPermissions() {
   useEffect(() => {
     setDevices([]); setDeviceId(''); setConsent(null); setLoaded(false);
     if (ready && user) void load();
-  }, [ready, user?.subjectId]);
+  }, [ready, user?.subjectId, configured, permissionId, policyVersion, purposeVersion, purpose]);
   const select = async (id: string) => {
     if (busy) return;
     setDeviceId(id); setConsent(null); setLoaded(false);

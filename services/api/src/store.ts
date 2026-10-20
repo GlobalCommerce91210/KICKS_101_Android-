@@ -21,6 +21,9 @@ import {
 } from './baseline.js';
 
 export type Device = { id: string; subjectId: string; tokenHash: string; revoked: boolean; vaultId?: string | null };
+export type BatchReceipt = { batchId: string; receiptId: string; payloadDigest: string; accepted: number; committedAt: string; replayed: boolean };
+export class BatchConflict extends Error { constructor() { super('batch_identity_conflict'); } }
+export class BatchConsentRequired extends Error { constructor() { super('active_purpose_consent_required'); } }
 export type AppCategory = 'social' | 'finance' | 'health' | 'entertainment' | 'utility' | 'shopping' | 'news' | 'gaming' | 'other';
 export type ConsentEvent = {
   id: string; deviceId: string; subjectId: string; permissionId: string;
@@ -134,8 +137,8 @@ export type AdminControlCenterAggregate = {
 export interface Store {
   findDeviceByTokenHash(hash: string): Promise<Device | null>;
   createDevice(device: Device & { environment: 'staging' | 'production'; appVersion?: string }): Promise<void>;
-  appendConsent(event: ConsentEvent): Promise<void>;
-  recordConsumerConsent(event: ConsentEvent, audit: AuditEvent): Promise<ConsumerConsentResult>;
+  appendConsent(event: ConsentEvent, beforeCommit?: (current: ConsentEvent | null) => Promise<void>): Promise<void>;
+  recordConsumerConsent(event: ConsentEvent, audit: AuditEvent, beforeCommit?: (current: ConsentEvent | null) => Promise<void>): Promise<ConsumerConsentResult>;
   currentConsent(deviceId: string, subjectId: string, permissionId: string): Promise<ConsentEvent | null>;
   consentByActivationRequest(deviceId: string, activationRequestId: string): Promise<ConsentEvent | null>;
   consentByActivationId(deviceId: string, activationId: string): Promise<ConsentEvent | null>;
@@ -143,7 +146,7 @@ export interface Store {
   appendCollectionEvent(event: CollectionEvent): Promise<void>;
   collectionEventsForDevice(deviceId: string): Promise<CollectionEvent[]>;
   hasBatch(id: string): Promise<boolean>;
-  appendBatch(input: { batchId: string; deviceId: string; schemaVersion: string; observations: Observation[] }): Promise<void>;
+  appendBatch(input: { batchId: string; deviceId: string; schemaVersion: string; observations: Observation[]; payloadDigest?: string; audit?: AuditEvent }): Promise<BatchReceipt>;
   engineSnapshot(deviceId: string, subjectId: string, limit: number): Promise<EngineSnapshot>;
   consumerState(deviceId: string, subjectId: string): Promise<ConsumerState>;
   revokeCommercialPermission(deviceId:string,subjectId:string,grantId:string,correlationId:string,idempotencyKey:string):Promise<{id:string;status:'revoked'}>;
@@ -177,9 +180,21 @@ function consentConflict(event: ConsentEvent, prior: ConsentEvent | null, curren
 }
 
 export class MemoryStore implements Store {
+  private consentWrites = new Map<string, Promise<void>>();
+  private async serializeConsent<T>(deviceId: string, operation: () => Promise<T>): Promise<T> {
+    const prior = this.consentWrites.get(deviceId) ?? Promise.resolve();
+    let release!: () => void;
+    const next = new Promise<void>(resolve => { release = resolve; });
+    this.consentWrites.set(deviceId, next);
+    await prior;
+    try { return await operation(); } finally {
+      release(); if (this.consentWrites.get(deviceId) === next) this.consentWrites.delete(deviceId);
+    }
+  }
   devices = new Map<string, Device>();
   consents: ConsentEvent[] = [];
   batches = new Set<string>();
+  private batchReceipts = new Map<string, { deviceId: string; receipt: BatchReceipt }>();
   observations: Observation[] = [];
   observationRecords: MemoryObservation[] = [];
   collectionEvents: CollectionEvent[] = [];
@@ -192,8 +207,20 @@ export class MemoryStore implements Store {
     return [...this.devices.values()].find(device => !device.revoked && safeEqual(device.tokenHash, hash)) ?? null;
   }
   async createDevice(device: Device) { this.devices.set(device.id, device); }
-  async appendConsent(event: ConsentEvent) { this.consents.push(event); }
-  async recordConsumerConsent(event: ConsentEvent, audit: AuditEvent): Promise<ConsumerConsentResult> {
+  async appendConsent(event: ConsentEvent, beforeCommit?: (current: ConsentEvent | null) => Promise<void>) {
+    if (beforeCommit) return this.serializeConsent(event.deviceId, async () => { await beforeCommit(await this.currentConsent(event.deviceId,event.subjectId,event.permissionId)); this.consents.push(event); });
+    this.consents.push(event);
+  }
+  async recordConsumerConsent(event: ConsentEvent, audit: AuditEvent, beforeCommit?: (current: ConsentEvent | null) => Promise<void>): Promise<ConsumerConsentResult> {
+    if (beforeCommit) return this.serializeConsent(event.deviceId, async () => {
+      const current = await this.currentConsent(event.deviceId,event.subjectId,event.permissionId);
+      const prior = await this.consentByActivationRequest(event.deviceId,event.activationRequestId ?? '');
+      const conflict = consentConflict(event,prior,current);
+      if (conflict) return { status: conflict };
+      if (prior) return { status: 'replayed', event: prior };
+      await beforeCommit(current);
+      return this.recordConsumerConsent(event, audit);
+    });
     // No await between validation and both writes: atomic within this memory store.
     const prior = [...this.consents].reverse().find(e => e.deviceId === event.deviceId &&
       e.activationRequestId === event.activationRequestId) ?? null;
@@ -227,11 +254,21 @@ export class MemoryStore implements Store {
     return this.collectionEvents.filter(event => event.deviceId === deviceId);
   }
   async hasBatch(id: string) { return this.batches.has(id); }
-  async appendBatch(input: { batchId: string; deviceId: string; observations: Observation[] }) {
+  async appendBatch(input: { batchId: string; deviceId: string; observations: Observation[]; payloadDigest?: string; audit?: AuditEvent }) {
+    const prior = this.batchReceipts.get(input.batchId);
+    if (this.batches.has(input.batchId)) {
+      if (!prior || prior.deviceId !== input.deviceId || !input.payloadDigest || prior.receipt.payloadDigest !== input.payloadDigest) throw new BatchConflict();
+      return { ...prior.receipt, replayed: true };
+    }
     this.batches.add(input.batchId);
     this.observations.push(...input.observations);
     const receivedAt = new Date().toISOString();
     this.observationRecords.push(...input.observations.map(observation => ({ ...observation, deviceId: input.deviceId, receivedAt })));
+    const receipt: BatchReceipt = { batchId: input.batchId, receiptId: randomUUID(), payloadDigest: input.payloadDigest ?? '',
+      accepted: input.observations.length, committedAt: receivedAt, replayed: false };
+    this.batchReceipts.set(input.batchId, { deviceId: input.deviceId, receipt });
+    if (input.audit) this.audits.push({ ...input.audit });
+    return { ...receipt };
   }
   async engineSnapshot(deviceId: string, subjectId: string, limit: number): Promise<EngineSnapshot> {
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
@@ -393,18 +430,22 @@ export class PostgresStore implements Store {
     await this.pool.query('INSERT INTO devices(id,subject_id,token_hash,environment,app_version,vault_id) VALUES($1,$2,$3,$4,$5,$6)',
       [device.id, device.subjectId, device.tokenHash, device.environment, device.appVersion ?? null, device.vaultId ?? null]);
   }
-  async appendConsent(event: ConsentEvent) {
+  async appendConsent(event: ConsentEvent, beforeCommit?: (current: ConsentEvent | null) => Promise<void>) {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', ['consumer-consent:' + event.deviceId]);
+      if (beforeCommit) {
+        const current = (await client.query('SELECT * FROM consent_events WHERE device_id=$1 AND subject_id=$2 AND permission_id=$3 ORDER BY occurred_at DESC LIMIT 1',[event.deviceId,event.subjectId,event.permissionId])).rows[0];
+        await beforeCommit(current ? mapConsent(current) : null);
+      }
     await client.query('INSERT INTO consent_events(id,device_id,subject_id,permission_id,action,purpose,policy_version,purpose_version,occurred_at,correlation_id,vault_id,activation_id,activation_vault_id,activation_request_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)',
       [event.id, event.deviceId, event.subjectId, event.permissionId, event.action, event.purpose, event.policyVersion, event.purposeVersion, event.occurredAt, event.correlationId, event.vaultId ?? null, event.activationId ?? null, event.activationVaultId ?? null, event.activationRequestId ?? null]);
       await client.query('COMMIT');
     } catch (error) { await client.query('ROLLBACK'); throw error; }
     finally { client.release(); }
   }
-  async recordConsumerConsent(event: ConsentEvent, audit: AuditEvent): Promise<ConsumerConsentResult> {
+  async recordConsumerConsent(event: ConsentEvent, audit: AuditEvent, beforeCommit?: (current: ConsentEvent | null) => Promise<void>): Promise<ConsumerConsentResult> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -422,6 +463,7 @@ export class PostgresStore implements Store {
         return conflict ? { status: conflict } : { status: 'replayed', event: prior! };
       }
       // Use database time and advance past the last decision to avoid clock skew/ties.
+      if (beforeCommit) await beforeCommit(current);
       const row = (await client.query(`INSERT INTO consent_events(id,device_id,subject_id,permission_id,action,purpose,policy_version,purpose_version,occurred_at,correlation_id,vault_id,activation_id,activation_vault_id,activation_request_id)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,GREATEST(clock_timestamp(),
           (SELECT max(occurred_at)+interval '1 microsecond' FROM consent_events WHERE device_id=$2 AND subject_id=$3 AND permission_id=$4)),
@@ -480,14 +522,41 @@ export class PostgresStore implements Store {
     }));
   }
   async hasBatch(id: string) { return (await this.pool.query('SELECT 1 FROM metadata_batches WHERE id=$1', [id])).rowCount === 1; }
-  async appendBatch(input: { batchId: string; deviceId: string; schemaVersion: string; observations: Observation[] }) {
+  async appendBatch(input: { batchId: string; deviceId: string; schemaVersion: string; observations: Observation[]; payloadDigest?: string; audit?: AuditEvent }) {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query('INSERT INTO metadata_batches(id,device_id,schema_version,observation_count) VALUES($1,$2,$3,$4)',
-        [input.batchId, input.deviceId, input.schemaVersion, input.observations.length]);
+      // Same lock as consent decisions: withdrawal and ingestion have a defined
+      // commit order across API instances, including retries after a lost reply.
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', ['consumer-consent:' + input.deviceId]);
+      const device = (await client.query('SELECT subject_id,revoked_at FROM devices WHERE id=$1 FOR SHARE', [input.deviceId])).rows[0];
+      if (!device || device.revoked_at) throw new BatchConsentRequired();
+      for (const observation of input.observations) {
+        const consent = (await client.query(`SELECT c.* FROM consent_events c WHERE c.device_id=$1 AND c.activation_id=$2
+          AND c.subject_id=$3 AND c.action='grant' AND c.purpose=$4 AND c.id=(SELECT latest.id FROM consent_events latest
+            WHERE latest.device_id=c.device_id AND latest.subject_id=c.subject_id AND latest.permission_id=c.permission_id
+            ORDER BY latest.occurred_at DESC LIMIT 1)`, [input.deviceId, observation.consentId, device.subject_id, observation.consentPurpose])).rows[0];
+        if (!consent) throw new BatchConsentRequired();
+      }
+      const receiptId = randomUUID(); const committedAt = new Date().toISOString();
+      const inserted = await client.query(`INSERT INTO metadata_batches(id,device_id,schema_version,observation_count,payload_digest,receipt_id,committed_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO NOTHING RETURNING id`,
+        [input.batchId, input.deviceId, input.schemaVersion, input.observations.length, input.payloadDigest ?? null, receiptId, committedAt]);
+      if (!inserted.rowCount) {
+        const prior = (await client.query('SELECT * FROM metadata_batches WHERE id=$1', [input.batchId])).rows[0];
+        if (!prior || prior.device_id !== input.deviceId || !input.payloadDigest || prior.payload_digest !== input.payloadDigest || !prior.receipt_id || !prior.committed_at) throw new BatchConflict();
+        await client.query('COMMIT');
+        return { batchId: input.batchId, receiptId: String(prior.receipt_id), payloadDigest: input.payloadDigest,
+          accepted: Number(prior.observation_count), committedAt: new Date(prior.committed_at).toISOString(), replayed: true };
+      }
       for (const observation of input.observations) await insertObservation(client, input.batchId, input.deviceId, observation);
+      if (input.audit) {
+        const event = input.audit;
+        await client.query('INSERT INTO audit_events(id,actor_id,action,target_type,target_id,outcome,occurred_at,correlation_id,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+          [event.id,event.actorId,event.action,event.targetType,event.targetId,event.outcome,event.occurredAt,event.correlationId,event.metadata]);
+      }
       await client.query('COMMIT');
+      return { batchId: input.batchId, receiptId, payloadDigest: input.payloadDigest ?? '', accepted: input.observations.length, committedAt, replayed: false };
     } catch (error) {
       await client.query('ROLLBACK'); throw error;
     } finally { client.release(); }

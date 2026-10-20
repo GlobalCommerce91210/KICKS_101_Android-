@@ -21,6 +21,8 @@ test('PostgreSQL native device provisioning persists retries and atomically roll
     await pool.query(await readFile(new URL('../db/schema.sql',import.meta.url),'utf8'));
     const account=await identity.createAccount({email:'native-provision@example.test',password:'Synthetic-Password-2026',terms_version:'one',privacy_version:'one'});
     await bindings.list(account.account.subject_id);
+    const history = await readFile(new URL('../db/migrations/005-device-owner-history.sql',import.meta.url),'utf8');
+    await pool.query(history); await pool.query(history);
     let provisioner=new PostgresIosDeviceProvisioner(pool);
     const input={accountSubjectId:account.account.subject_id,requestId:randomUUID(),deviceId:randomUUID(),deviceToken:randomBytes(32).toString('base64url'),publicKey:randomBytes(32).toString('base64')};
     assert.equal((await provisioner.provision(input)).status,'provisioned');
@@ -33,8 +35,19 @@ test('PostgreSQL native device provisioning persists retries and atomically roll
     assert.equal((await pool.query('SELECT count(*)::int AS n FROM consent_events')).rows[0].n,0);
     await assert.rejects(provisioner.provision({...input,accountSubjectId:'different-account'}));
     await bindings.revoke(input.accountSubjectId,input.deviceId);
+    await assert.rejects(bindings.bind({subjectId:input.accountSubjectId,deviceId:input.deviceId,collectorSubjectId:'replacement',platform:'ios'}));
+    await assert.rejects(pool.query("UPDATE consumer_device_bindings SET status='active' WHERE device_id=$1",[input.deviceId]));
+    await assert.rejects(pool.query('DELETE FROM consumer_device_bindings WHERE device_id=$1',[input.deviceId]));
     await assert.rejects(provisioner.provision(input)); // never revive a removed binding
     assert.equal((await pool.query('SELECT count(*)::int AS n FROM devices')).rows[0].n,1);
+    const second=await identity.createAccount({email:'second-owner@example.test',password:'Synthetic-Password-2026',terms_version:'one',privacy_version:'one'});
+    const competingDevice=randomUUID();
+    const claims=await Promise.allSettled([account.account.subject_id,second.account.subject_id].map(subjectId=>bindings.bind({
+      subjectId,deviceId:competingDevice,collectorSubjectId:randomUUID(),platform:'ios',
+    })));
+    assert.equal(claims.filter(claim=>claim.status==='fulfilled').length,1);
+    assert.equal(claims.filter(claim=>claim.status==='rejected').length,1);
+    assert.equal((await pool.query("SELECT count(*)::int AS n FROM consumer_device_bindings WHERE device_id=$1 AND status='active'",[competingDevice])).rows[0].n,1);
   }finally{await pool.end();await admin.query('DROP SCHEMA '+schema+' CASCADE');await admin.end();}
 });
 
@@ -83,6 +96,8 @@ test('PostgreSQL retains mobile account, refresh session, collector binding, con
     const uniqueness = await readFile(new URL('../db/migrations/003-consent-request-uniqueness.sql', import.meta.url), 'utf8');
     await setup.query(uniqueness);
     await setup.query(uniqueness);
+    const receipts = await readFile(new URL('../db/migrations/006-batch-receipts.sql',import.meta.url),'utf8');
+    await setup.query(receipts); await setup.query(receipts);
   } finally { await setup.end(); }
   let store: PostgresStore;
   let identity: PostgresConsumerIdentityStore;
@@ -168,11 +183,15 @@ test('PostgreSQL retains mobile account, refresh session, collector binding, con
   const batch = () => ({ batchId: randomUUID(), schemaVersion: '2026-08-01', observations: [{ eventId: randomUUID(), occurredAt: new Date().toISOString(), sourceApp: 'com.synthetic.app', attribution: 'verified', destinationHost: 'google-analytics.com', protocol: 'tls', bytesBucket: '1-10KB', classification: 'expected', consentId: activationId, consentPurpose: decision.purpose }] });
   const collectorHeaders = { authorization: 'Bearer ' + token };
   const acceptedBatch = batch();
-  assert.equal((await app.inject({ method: 'POST', url: '/v1/metadata-batches', headers: collectorHeaders, payload: acceptedBatch })).statusCode, 202);
+  const firstReceipt = await app.inject({ method: 'POST', url: '/v1/metadata-batches', headers: collectorHeaders, payload: acceptedBatch });
+  assert.equal(firstReceipt.statusCode, 202);
   // Duplicate collector retries do not create another observation.
-  assert.equal((await app.inject({ method: 'POST', url: '/v1/metadata-batches', headers: collectorHeaders, payload: acceptedBatch })).statusCode, 409);
+  assert.equal((await app.inject({ method: 'POST', url: '/v1/metadata-batches', headers: collectorHeaders, payload: acceptedBatch })).statusCode, 200);
   await app.close();
   app = openServer();
+  const retried = await Promise.all(Array.from({length:12},()=>app.inject({method:'POST',url:'/v1/metadata-batches',headers:collectorHeaders,payload:acceptedBatch})));
+  assert.ok(retried.every(response=>response.statusCode===200));
+  assert.ok(retried.every(response=>response.json().receiptId===firstReceipt.json().receiptId));
   const restored = new SessionManager(storage, () => 'https://staging.example.test', transport);
   await restored.restore();
   assert.equal(restored.user?.subjectId, session.user?.subjectId);

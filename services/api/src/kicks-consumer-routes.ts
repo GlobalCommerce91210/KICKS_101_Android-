@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { ComplianceEngine } from './compliance.js';
 import type { ConsumerIdentityStore } from './consumer-identity.js';
 import type { ConsumerDeviceBindingStore } from './consumer-device-bindings.js';
+import { DeviceOwnershipConflict, DeviceBindingRevoked } from './consumer-device-bindings.js';
 import type { PermissionsEngine } from './permissions.js';
 import type { Store } from './store.js';
 import type { WalletEngine } from './wallet.js';
@@ -76,6 +77,13 @@ export function registerKicksConsumerRoutes(
       profile,
     };
   };
+
+  app.get('/core/consumer/v1/monitoring-policy', async (request, reply) => {
+    if (!await authenticateConsumer(request.headers.authorization)) return reply.code(401).send({ error: 'unauthorized' });
+    const policy = dependencies.iosGateway?.enrollment.monitoringPolicy();
+    if (!policy) return reply.code(503).send({ error: 'monitoring_policy_not_configured' });
+    return { policy, collectionEnabled: false };
+  });
 
   const buildSnapshot = async (subjectId: string) => {
     const generatedAt = new Date().toISOString();
@@ -418,6 +426,25 @@ export function registerKicksConsumerRoutes(
     // Any authority/DB failure propagates as failure: reconciler removes all peers.
     return gateway.enrollment.peers();
   });
+  app.post('/internal/staging/ios-gateway/applied', async (request, reply) => {
+    const gateway = dependencies.iosGateway;
+    if (!gateway || !await gateway.authenticateAuthority(request.headers.authorization)) return reply.code(401).send({ error: 'unauthorized' });
+    const input = z.object({ snapshotId: z.string().regex(/^[a-f0-9]{64}$/) }).strict().safeParse(request.body);
+    if (!input.success) return reply.code(422).send({ error: 'validation_error' });
+    await gateway.enrollment.acknowledge(input.data.snapshotId);
+    return { status: 'acknowledged' };
+  });
+  app.post('/core/consumer/v1/devices/:deviceId/ios-gateway-status', async (request, reply) => {
+    const gateway = dependencies.iosGateway;
+    if (!gateway) return reply.code(503).send({ error: 'ios_gateway_not_configured' });
+    const { deviceId } = request.params as { deviceId: string };
+    const authorized = await accountBinding(request.headers.authorization, deviceId);
+    if (!authorized) return reply.code(401).send({ error: 'unauthorized' });
+    if (!authorized.binding) return reply.code(404).send({ error: 'device_binding_not_found' });
+    const status = await gateway.enrollment.status(authorized.consumer.subjectId, deviceId);
+    if (!status.ready) request.log.info({ event: 'collector.gateway.not_ready', reason: status.reason }, 'Collector gateway check');
+    return { ...status, requestId: request.id };
+  });
 
   app.get('/core/consumer/v1/devices/:deviceId/consent', async (request, reply) => {
     const { deviceId } = request.params as { deviceId: string };
@@ -453,7 +480,7 @@ export function registerKicksConsumerRoutes(
       targetId: input.permissionId, outcome: 'accepted',
       occurredAt: event.occurredAt, correlationId: request.id,
       metadata: { deviceId, consentEventId: event.id, purpose: input.purpose },
-    });
+    }, dependencies.iosGateway ? current => dependencies.iosGateway!.enrollment.beforeConsent(deviceId, event.subjectId, event.permissionId, event.action, current) : undefined);
     if (!('event' in result)) {
       return reply.code(409).send({ error: result.status, request_id: request.id });
     }
@@ -544,14 +571,24 @@ export function registerKicksConsumerRoutes(
       });
     }
 
-    const binding = await deviceBindingStore.bind({
+    let binding;
+    try { binding = await deviceBindingStore.bind({
       subjectId: consumer.subjectId,
       deviceId: collectorDevice.id,
       collectorSubjectId: collectorDevice.subjectId,
       displayName: parsed.data.display_name,
       platform: parsed.data.platform,
       appVersion: parsed.data.app_version,
-    });
+    }); } catch (error) {
+      if (error instanceof DeviceBindingRevoked) return reply.code(409).send({ error: 'device_binding_revoked',
+        message: 'This enrollment was revoked. Review secure re-enrollment with support; existing credentials and records were preserved.', request_id: request.id });
+      if (error instanceof DeviceOwnershipConflict) return reply.code(409).send({
+        error: 'device_already_linked',
+        message: 'This device is already connected to another account. Use the existing account to review its connection.',
+        request_id: request.id,
+      });
+      throw error;
+    }
 
     return reply.code(201).send(binding);
   });
@@ -568,6 +605,9 @@ export function registerKicksConsumerRoutes(
     }
 
     const { deviceId } = request.params as { deviceId: string };
+    const existing = (await deviceBindingStore.list(consumer.subjectId)).find(binding => binding.device_id === deviceId);
+    if (!existing) return reply.code(404).send({ error: 'device_binding_not_found' });
+    await dependencies.iosGateway?.enrollment.beforeUnlink(deviceId);
     const revoked = await deviceBindingStore.revoke(
       consumer.subjectId,
       deviceId,

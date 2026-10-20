@@ -1,0 +1,20 @@
+name: collector-preservation
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/modules/kicks-tunnel/ios/EncryptedObservationOutbox.swift'
+      - 'apps/mobile/scripts/test-encrypted-outbox.swift'
+      - '.github/workflows/collector-preservation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  encrypted-outbox:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate concurrent preservation and redacted diagnostics
+        run: |
+          swiftc apps/mobile/modules/kicks-tunnel/ios/EncryptedObservationOutbox.swift apps/mobile/scripts/test-encrypted-outbox.swift -o "$RUNNER_TEMP/kicks-outbox-test"
+          "$RUNNER_TEMP/kicks-outbox-test"

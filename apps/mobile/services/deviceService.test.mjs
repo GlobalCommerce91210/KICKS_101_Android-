@@ -9,7 +9,7 @@ function fixture() {
     async request(path, init = {}) {
       calls.push({ path, method: init.method ?? 'GET', body: init.body && JSON.parse(init.body) });
       if (init.method === 'POST') consent = { ...consent, action: 'revoke' };
-      return { ok: true, async json() { return { consent }; } };
+      return { ok: true, async json() { return { consent, devices: [{ device_id: 'device', subject_id: 'human', platform: 'ios', status: 'active' }] }; } };
     },
   };
   const native = { async getDeviceId() { return 'device'; }, async stop() { calls.push({ method: 'STOP' }); },
@@ -20,7 +20,20 @@ function fixture() {
 }
 test('enrollment uses authenticated native proof and never grants consent or starts VPN', async () => {
   const f = fixture(); assert.equal(await enrollCurrentDevice(f.manager, f.native), 'device');
-  assert.deepEqual(f.calls, [{ method: 'PROVISION', origin: 'staging', subject: 'human' }]);
+  assert.deepEqual(f.calls, [{ method: 'PROVISION', origin: 'staging', subject: 'human' }, { path: '/core/consumer/v1/devices', method: 'GET', body: undefined }]);
+});
+
+test('enrollment requires a verified active binding to this account', async () => {
+  for (const device of [null, { device_id: 'device', subject_id: 'other', platform: 'ios', status: 'active' },
+    { device_id: 'device', subject_id: 'human', platform: 'ios', status: 'revoked' }]) {
+    const f = fixture(); f.manager.request = async () => ({ ok: true, json: async () => ({ devices: device ? [device] : [] }) });
+    await assert.rejects(enrollCurrentDevice(f.manager, f.native), /could not be confirmed/);
+  }
+});
+
+test('account change while confirming enrollment rejects the connection', async () => {
+  const f = fixture(); f.manager.request = async () => { f.manager.user = null; return { ok: true }; };
+  await assert.rejects(enrollCurrentDevice(f.manager, f.native), /session changed/);
 });
 test('unsupported enrollment fails without account or device mutations', async () => {
   const f = fixture(); await assert.rejects(enrollCurrentDevice(f.manager), /unavailable/); assert.equal(f.calls.length, 0);

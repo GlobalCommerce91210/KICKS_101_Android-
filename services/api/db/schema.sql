@@ -15,7 +15,8 @@ REVOKE UPDATE, DELETE ON consent_events FROM PUBLIC;
 
 CREATE TABLE metadata_batches (
   id uuid PRIMARY KEY, device_id uuid NOT NULL REFERENCES devices(id), schema_version text NOT NULL,
-  received_at timestamptz NOT NULL DEFAULT now(), observation_count integer NOT NULL CHECK (observation_count BETWEEN 1 AND 250)
+  received_at timestamptz NOT NULL DEFAULT now(), observation_count integer NOT NULL CHECK (observation_count BETWEEN 1 AND 250),
+  payload_digest text, receipt_id uuid, committed_at timestamptz
 );
 CREATE TABLE metadata_observations (
   id uuid PRIMARY KEY, batch_id uuid NOT NULL REFERENCES metadata_batches(id), consent_id uuid NOT NULL,

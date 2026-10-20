@@ -42,6 +42,12 @@ jobs:
         run: npm ci
       - name: Select supported Xcode
         run: sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+      - name: Validate encrypted observation outbox
+        # Standalone CryptoKit checks exercise durable storage before native build.
+        # The producer remains gated; no synthetic data is connected to collection.
+        run: |
+          swiftc apps/mobile/modules/kicks-tunnel/ios/EncryptedObservationOutbox.swift apps/mobile/scripts/test-encrypted-outbox.swift -o "$RUNNER_TEMP/kicks-outbox-test"
+          "$RUNNER_TEMP/kicks-outbox-test"
       - name: Generate app and embedded tunnel
         working-directory: apps/mobile
         run: npx expo prebuild --platform ios --clean --no-install
