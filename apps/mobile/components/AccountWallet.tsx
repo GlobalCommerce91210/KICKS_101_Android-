@@ -1,4 +1,4 @@
-import { visibleCache, type RequestState } from '../services/requestState';
+import { visibleCache, type RequestState } from '../services/requestState.mjs';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, Text } from 'react-native';
 import { router } from 'expo-router';

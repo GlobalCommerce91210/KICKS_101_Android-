@@ -1,4 +1,4 @@
-import { createTransport, parseResponse, isObject } from './requestState';
+import { createTransport, parseResponse, isObject } from './requestState.mjs';
 const request = createTransport(fetch);
 import { Platform } from 'react-native';
 import { requireIosApiOrigin } from './iosApiOrigin';

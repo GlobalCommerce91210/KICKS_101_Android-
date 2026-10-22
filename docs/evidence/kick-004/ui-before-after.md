@@ -5,7 +5,7 @@ This is source evidence, not rendered screenshot or physical-device proof. Basel
 | Trigger | Before | After | Source |
 |---|---|---|---|
 | Web/Android wallet API fails | Approved $24.80; pending $4.20; settled $12.50; lifetime $37.30; demo user and simulated-credit controls | Authenticated account wallet; `UNAVAILABLE`, reference ID and “Wallet service unavailable”; no inferred numeric balance | `apps/mobile/app/wallet.tsx`, `apps/mobile/components/AccountWallet.tsx` |
-| Wallet succeeds with numeric zeros | Missing and real zero could be indistinguishable in account wallet | `$0.00 earned`, `Pending: $0.00`, `Settled: $0.00`, `SUCCESS`, only after schema-valid numeric response | `AccountWallet.tsx`, `requestState.ts` |
+| Wallet succeeds with numeric zeros | Missing and real zero could be indistinguishable in account wallet | `$0.00 earned`, `Pending: $0.00`, `Settled: $0.00`, `SUCCESS`, only after schema-valid numeric response | `AccountWallet.tsx`, `requestState.mjs` |
 | Wallet refresh fails after valid load | Previously loaded data discarded | `STALE WALLET · previously loaded` with failed request state/reference, bounded to five minutes and same account | `AccountWallet.tsx` |
 | Profile refresh pending/fails | Valid data erased at refresh start | Previously loaded data retained with explicit stale notice; monitoring status withheld while pending/failed | `apps/mobile/app/profile.tsx` |
 | Devices payload is `{}` or contains null records | Could display a successful empty list or fail during rendering | `ERROR` / unavailable source; no confirmed empty list or enrollment success | `profileService.ts`, `AccountPermissions.tsx` |

@@ -17,11 +17,11 @@ Repository: GlobalCommerce91210/KICKS_101_Android-. Base: `codex/device-connecti
 | Shopping/rewards | Failed loads logged silently while default dollar values/scores appeared; local click displayed ledger agreement success | Explicit loading/unavailable/retry UI; discard superseded loads; validate summary/gate/match envelopes; remove numeric placeholders; no agreement success without an acceptance API |
 | Diagnostics | Raw legacy errors logged from shopping requests | Bounded in-memory ring of 50 entries containing only opaque request ID, status, attempt; no URL, query, subject, payload, token or exception text. `getRequestDiagnostics()` returns copies. No external telemetry is sent |
 
-401 still clears the local session. 403 reports UNAUTHORIZED without treating every forbidden source as a globally expired session. 404 is UNAVAILABLE for these required resource endpoints, not an empty dataset. 429/500/502/503/504 GET retries use 250/500 ms backoff or a valid Retry-After up to two seconds. Longer/invalid Retry-After is surfaced without retrying early. Network failures, timeouts, non-retryable HTTP responses and all mutations have no automatic retry. There is no background retry loop. No endpoint contracts or production environment settings changed.
+An HTML 403 or explicit Cloudflare managed challenge is UNAVAILABLE, distinct from a JSON API permission denial. 401 still clears the local session. 403 reports UNAUTHORIZED without treating every forbidden source as a globally expired session. 404 is UNAVAILABLE for these required resource endpoints, not an empty dataset. 429/500/502/503/504 GET retries use 250/500 ms backoff or a valid Retry-After up to two seconds. Longer/invalid Retry-After is surfaced without retrying early. Network failures, timeouts, non-retryable HTTP responses and all mutations have no automatic retry. There is no background retry loop. No endpoint contracts or production environment settings changed.
 
 ## Integration inventory
 
-- Authentication/interceptors: `SessionProvider.tsx` configures the HTTPS origin and SecureStore-backed refresh storage; `sessionCore.ts` owns bearer injection, single-flight refresh, path allowlist, session generation and sign-out. It now delegates transport and JSON parsing to `requestState.ts`.
+- Authentication/interceptors: `SessionProvider.tsx` configures the HTTPS origin and SecureStore-backed refresh storage; `sessionCore.ts` owns bearer injection, single-flight refresh, path allowlist, session generation and sign-out. It now delegates transport and JSON parsing to `requestState.mjs`.
 - Consumer profile: account/product identity rechecked before optional source reads in `profileService.ts`; concurrent whole-profile hydration is shared for the exact current session only.
 - Devices/enrollment: authenticated `/core/consumer/v1/devices`; native proof remains in `deviceService.mjs`/the native module. Enrollment still requires matching backend active binding; no enrollment mutation is retried automatically.
 - Permissions/consent: authenticated effective permissions, consent history and per-device consent routes. AccountPermissions reads/writes do not activate the collector.
@@ -32,12 +32,15 @@ Repository: GlobalCommerce91210/KICKS_101_Android-. Base: `codex/device-connecti
 
 ## Verification — 2026-10-22
 
-- Mobile TypeScript typecheck: PASS.
-- Full mobile automated suite: **96 passed, 0 failed, 0 skipped**. Includes existing enrollment, account/session, monitoring policy and collector activation safeguards.
+- Mobile and API workspace TypeScript typechecks: PASS after the shared-module compatibility fix.
+- Full mobile automated suite: **97 passed, 0 failed, 0 skipped**. Includes existing enrollment, account/session, monitoring policy and collector activation safeguards.
 - New reliability tests cover populated/empty responses; zero balances; 401/403/404/429/500/503; Retry-After/backoff bounds; no mutation/auth-error retries; timeout/offline and restoration; malformed JSON/missing numeric fields; duplicate reads; credential isolation; stale-cache age/account isolation; private diagnostic boundaries. Profile tests also distinguish empty from malformed lists.
 - Baseline and modified Expo web exports: PASS. These are build checks, not screenshots or installed-device tests.
+- API suite after the web build: **53 passed, 3 failed, 4 database-dependent tests skipped**. The three failures are identity email verification, password reset and MFA lifecycle tests expecting debug tokens that are absent. Running the same lifecycle test file at the untouched base `0557bb5` reproduced all three failures (2 passed / 3 failed). They are confirmed pre-existing, not counted as acceptance passes. The initial static-index test failed before web assets existed and passed after the required web build.
 - `git diff --check`: PASS.
 - Read-only public staging probes: `/health` = 200; account, snapshot, devices, effective permissions and wallet = 401 without bearer. `/v1/me/consumer-state` = 403. No consumer account was created or modified by these probes. These results establish unauthenticated reachability/status only.
+
+Hosted CI at `707369903439b84bf27a614356e5268c99839d76`: staging smoke [39853577617](https://github.com/GlobalCommerce91210/KICKS_101_Android-/actions/runs/39853577617) FAILED because health was 200 but the account route returned HTTP 403 with a Cloudflare HTML managed challenge from the hosted runner. Account/profile application checks were not reached. Other quality/PostgreSQL/iOS checks were still running when inspected. This differs from the local anonymous account probe (401), confirming caller-dependent edge behavior. A follow-up response-classification test distinguishes that challenge from a JSON 403 authorization denial.
 
 ## Open dependencies / acceptance limits
 
@@ -63,7 +66,10 @@ Monitoring remains separately authorized through the existing native/consent/lea
 - `apps/mobile/services/profileService.test.mjs`
 - `apps/mobile/services/profileService.ts`
 - `apps/mobile/services/requestState.test.mjs`
-- `apps/mobile/services/requestState.ts`
+- `apps/mobile/services/requestState.d.mts`
+- `apps/mobile/services/requestState.mjs`
 - `apps/mobile/services/sessionCore.ts`
 - `docs/KICK-004.md`
 - `docs/evidence/kick-004/ui-before-after.md`
+
+Shared helper uses `.mjs` plus `requestState.d.mts` declarations to remain compatible with both Expo and NodeNext API tests. Initial hosted quality/PostgreSQL checks exposed TS5097 from a `.ts` import; this source-level compatibility issue was repaired without changing backend configuration.

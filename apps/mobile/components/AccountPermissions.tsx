@@ -1,4 +1,4 @@
-import { parseResponse, isObject } from '../services/requestState';
+import { parseResponse, isObject } from '../services/requestState.mjs';
 import { randomUUID } from 'expo-crypto';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';

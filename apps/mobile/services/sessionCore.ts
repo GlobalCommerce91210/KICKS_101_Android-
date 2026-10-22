@@ -1,4 +1,4 @@
-import { createTransport, parseResponse, isObject } from './requestState.ts';
+import { createTransport, parseResponse, isObject } from './requestState.mjs';
 export interface AccountUser { subjectId: string; email: string; }
 export interface SessionStorage { read(): Promise<string | null>; write(value: string): Promise<void>; clear(): Promise<void>; }
 export class SessionError extends Error {}

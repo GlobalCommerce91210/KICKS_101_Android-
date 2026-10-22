@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createTransport, parseResponse, validWallet, ApiError } from './requestState.ts';
+import { createTransport, parseResponse, validWallet, ApiError } from './requestState.mjs';
 const wallet = { total_earned: 0, total_pending: 0, total_settled: 0 };
 const validate = value => Array.isArray(value?.items);
 test('populated and successful empty responses remain distinct from errors; real zero survives', async () => {
@@ -57,7 +57,7 @@ test('diagnostics contain only correlation ID, status and attempt',async()=>{
 });
 
 test('stale cache is bounded, identity scoped and never reused after account replacement',async()=>{
-  const { visibleCache }=await import('./requestState.ts');
+  const { visibleCache }=await import('./requestState.mjs');
   const account={}; const cache={account,data:wallet,at:1000};
   assert.equal(visibleCache(cache,account,2000),wallet);
   assert.equal(visibleCache(cache,{},2000),null);
@@ -67,10 +67,14 @@ test('stale cache is bounded, identity scoped and never reused after account rep
 });
 
 test('in-memory diagnostics include network failures and remain bounded without URLs or identities',async()=>{
-  const { getRequestDiagnostics }=await import('./requestState.ts');
+  const { getRequestDiagnostics }=await import('./requestState.mjs');
   const send=createTransport(async()=>{throw new Error('private')});
   for(let i=0;i<55;i++) await assert.rejects(send('https://secret.test/account'),ApiError);
   const events=getRequestDiagnostics(); assert.equal(events.length,50);
   assert.ok(events.every(event=>event.status===null));
   assert.ok(!JSON.stringify(events).includes('secret'));
+});
+
+test('Cloudflare HTML 403 is service unavailability, not a consumer permission decision', async () => {
+  await assert.rejects(parseResponse(new Response('<html>challenge</html>',{status:403,headers:{'content-type':'text/html','cf-mitigated':'challenge'}}),validWallet), e => e.state === 'UNAVAILABLE' && e.status === 403);
 });

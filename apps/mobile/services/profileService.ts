@@ -1,4 +1,4 @@
-import { parseResponse, isObject, validWallet, ApiError, type RequestState } from './requestState.ts';
+import { parseResponse, isObject, validWallet, ApiError, type RequestState } from './requestState.mjs';
 import { SessionError, SessionManager } from './sessionCore.ts';
 
 type JsonObject = Record<string, any>;
