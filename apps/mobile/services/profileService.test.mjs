@@ -102,3 +102,20 @@ for (const denied of [
     assert.equal(resourceReads, 0);
   });
 }
+
+for (const [devices, state] of [[{ devices: [] }, 'EMPTY'], [{}, 'ERROR'], [{ devices: [null] }, 'ERROR']]) {
+  test('device shape is validated before empty/success classification: ' + state, async () => {
+    const manager = { user: { subjectId: 'ds-sub', email: 'test@example.test' }, async request(path) {
+      if (path.endsWith('/account')) return response({ subject_id: 'ds-sub', account_status: 'active' });
+      if (path.endsWith('/products/kicks')) return response({ entitlement: { subject_id: 'ds-sub', status: 'active' }, profile: { subject_id: 'ds-sub', status: 'active' } });
+      if (path.endsWith('/devices')) return response(devices);
+      if (path.endsWith('/wallet')) return response({ total_earned: 0, total_pending: 0, total_settled: 0 });
+      return response({}, 503);
+    } };
+    const view = await loadConsumerProfile(manager);
+    assert.equal(view.sources['connected devices'].state, state);
+    assert.equal(view.unavailable.includes('connected devices'), state !== 'EMPTY');
+    assert.equal(view.wallet.total_earned, 0);
+    assert.equal(view.sources.wallet.state, 'SUCCESS');
+  });
+}

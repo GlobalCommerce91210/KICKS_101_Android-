@@ -24,19 +24,20 @@ export default function Profile() {
 function ConsumerProfile() {
   const { manager, user, ready } = useSession();
   const [loadedProfile, setProfile] = useState<ConsumerProfileView | null>(null);
+  const [loadedAt, setLoadedAt] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const requestId = useRef(0);
-  const profile = loadedProfile?.account.subjectId === user?.subjectId ? loadedProfile : null;
+  const profile = loadedProfile?.account.subjectId === user?.subjectId && Date.now() - loadedAt < 300000 ? loadedProfile : null;
   const refresh = useCallback(async () => {
     if (!manager.user) return;
     const id = ++requestId.current;
     const account = manager.user;
-    setLoading(true); setError(null); setProfile(null);
+    setLoading(true); setError(null);
     try {
       const next = await loadConsumerProfile(manager);
-      if (id === requestId.current && manager.user === account) setProfile(next);
+      if (id === requestId.current && manager.user === account) { setProfile(next); setLoadedAt(Date.now()); }
     }
     catch (failure) {
       if (id !== requestId.current || manager.user !== account) return;
@@ -63,13 +64,14 @@ function ConsumerProfile() {
   const activePermissions = profile?.permissions ? countOf((profile.permissions as any).apps) : null;
   const revoked = typeof (profile?.snapshot as any)?.permissions?.revoked === 'number' ? (profile?.snapshot as any).permissions.revoked : null;
   const wallet = profile?.wallet as any;
-  const monitoring = profile?.monitoring as any;
+  const monitoring = !loading && !error ? profile?.monitoring as any : null;
 
   return <Screen>
     <BrandHeader section="DataStorm consumer profile" />
     <Text style={ui.title}>Your account. Your choices.</Text>
     <Text style={ui.body}>KICK’S uses your verified DataStorm consumer identity. Devices and collector identities remain separate and can be revoked independently.</Text>
 
+    {(loading || error) && profile && <Card><Text accessibilityRole="alert" style={ui.body}>Previously loaded data · stale. Monitoring and permissions must be verified again before any action.</Text></Card>}
     {error && <Card><Text accessibilityRole="alert" style={s.error}>{error}</Text><Pressable onPress={refresh}><Text style={s.link}>Try again</Text></Pressable></Card>}
 
     <Card accent>
@@ -120,7 +122,7 @@ function ConsumerProfile() {
 
     {!!profile?.unavailable.length && <Card>
       <Text style={ui.eyebrow}>STAGING AVAILABILITY</Text>
-      <Text style={ui.body}>Some profile sources are not available from the current staging API: {profile.unavailable.join(', ')}. No placeholder data is being presented as live.</Text>
+      <Text style={ui.body}>Some profile sources are not available from the current staging API: {profile.unavailable.map(label => `${label}: ${profile.sources[label]?.state ?? 'UNAVAILABLE'}. ${profile.sources[label]?.message ?? ''}`).join(', ')}. No placeholder data is being presented as live.</Text>
     </Card>}
 
     <Pressable disabled={loading} onPress={refresh}><Text style={s.link}>{loading ? 'Refreshing…' : 'Refresh profile'}</Text></Pressable>

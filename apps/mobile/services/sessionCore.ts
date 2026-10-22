@@ -1,3 +1,4 @@
+import { createTransport, parseResponse, isObject } from './requestState.mjs';
 export interface AccountUser { subjectId: string; email: string; }
 export interface SessionStorage { read(): Promise<string | null>; write(value: string): Promise<void>; clear(): Promise<void>; }
 export class SessionError extends Error {}
@@ -19,9 +20,9 @@ export class SessionManager {
   private listeners = new Set<() => void>();
   private storage: SessionStorage;
   private baseUrl: () => string;
-  private transport: typeof fetch;
+  private transport: (url: string, init?: RequestInit) => Promise<Response>;
   constructor(storage: SessionStorage, baseUrl: () => string, transport: typeof fetch = fetch) {
-    this.storage = storage; this.baseUrl = baseUrl; this.transport = transport;
+    this.storage = storage; this.baseUrl = baseUrl; this.transport = createTransport(transport);
   }
   subscribe(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   private emit() { for (const listener of this.listeners) listener(); }
@@ -31,12 +32,9 @@ export class SessionManager {
     return pending;
   }
   private async send(path: string, init: RequestInit = {}) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 20000);
-    try { return await this.transport(this.baseUrl() + path, { ...init, redirect: 'error', signal: controller.signal }); }
-    catch { throw new SessionError('Unable to connect. Check your connection and try again.'); }
-    finally { clearTimeout(timer); }
+    return this.transport(this.baseUrl() + path, init);
   }
+
   private async verify(accessToken: string): Promise<AccountUser> {
     const headers = { authorization: 'Bearer ' + accessToken };
     const [accountResponse, accessResponse] = await Promise.all([
@@ -44,8 +42,8 @@ export class SessionManager {
       this.send('/core/identity/v1/products/kicks', { headers })
     ]);
     if (!accountResponse.ok || !accessResponse.ok) throw new SessionError('Your account access could not be verified. Sign in again.');
-    const account = await accountResponse.json();
-    const access = await accessResponse.json();
+    const account = await parseResponse(accountResponse, isObject);
+    const access = await parseResponse(accessResponse, isObject);
     if (typeof account.subject_id !== 'string' || typeof account.email !== 'string' ||
         !['active', 'pending_verification'].includes(account.account_status) ||
         access.entitlement?.subject_id !== account.subject_id ||
@@ -127,7 +125,7 @@ export class SessionManager {
       body: JSON.stringify({ email: email.trim(), password })
     });
     if (!response.ok) throw new SessionError(response.status === 401 ? 'Email or password was not accepted.' : 'Sign-in is unavailable. Try again later.');
-    await this.accept(await response.json(), epoch);
+    await this.accept(await parseResponse(response, isObject), epoch);
   }
   async restore() {
     const epoch = this.epoch;
@@ -164,7 +162,7 @@ export class SessionManager {
         throw new SessionError(response.status === 401 || response.status === 403
           ? 'Your session expired. Sign in again.' : 'Account service is unavailable. Try again later.');
       }
-      await this.accept(await response.json(), epoch);
+      await this.accept(await parseResponse(response, isObject), epoch);
     })();
     this.refreshFlight = flight;
     try { await flight; } finally { if (this.refreshFlight === flight) this.refreshFlight = null; }
@@ -192,7 +190,7 @@ export class SessionManager {
       const response = await this.send(path, { ...init, headers });
       if (epoch !== this.epoch) throw new SessionError('Your session changed. Try again.');
       if (response.status === 401) {
-        await this.logout(); throw new SessionError('Your session expired. Sign in again.');
+        await this.logout().catch(() => {}); throw Object.assign(new SessionError('Your session expired. Sign in again.'), { state: 'UNAUTHORIZED', status: 401, requestId: response.headers.get('x-kicks-request-id') });
       }
       return response;
     } catch (error) {

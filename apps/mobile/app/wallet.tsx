@@ -25,8 +25,7 @@ const USER_ID = 'user_demo_01';
 type Tab = 'ledger' | 'by_app' | 'by_metadata';
 
 export default function Wallet() {
-  if (Platform.OS === 'ios') return <AccountWallet />;
-  return <LegacyWallet />;
+  return <AccountWallet />;
 }
 
 function LegacyWallet() {

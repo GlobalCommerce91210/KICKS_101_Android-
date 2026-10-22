@@ -1,3 +1,5 @@
+import { createTransport, parseResponse, isObject } from './requestState.mjs';
+const request = createTransport(fetch);
 import { Platform } from 'react-native';
 import { requireIosApiOrigin } from './iosApiOrigin';
 
@@ -147,7 +149,8 @@ export interface AppIntelligenceSummary {
 }
 
 function getBaseUrl(): string {
-  if (Platform.OS === 'ios') return requireIosApiOrigin(process.env.EXPO_PUBLIC_IOS_API_URL);
+  if (Platform.OS !== 'web') return requireIosApiOrigin(Platform.OS === 'ios' ? process.env.EXPO_PUBLIC_IOS_API_URL ?? process.env.EXPO_PUBLIC_API_URL : process.env.EXPO_PUBLIC_API_URL);
+  if (process.env.EXPO_PUBLIC_API_URL) return requireIosApiOrigin(process.env.EXPO_PUBLIC_API_URL);
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
     return window.location.origin;
   }
@@ -156,57 +159,50 @@ function getBaseUrl(): string {
 
 export const api = {
   async getAppSummary(appId: string): Promise<AppIntelligenceSummary> {
-    const res = await fetch(`${getBaseUrl()}/v1/intelligence/apps/${encodeURIComponent(appId)}/summary`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}: failed to fetch app summary`);
-    return res.json();
+    const res = await request(`${getBaseUrl()}/v1/intelligence/apps/${encodeURIComponent(appId)}/summary`);
+    return parseResponse(res, value => isObject(value) && typeof value.app_id === 'string' && typeof value.total_estimated_value === 'number' && Number.isFinite(value.total_estimated_value) && isObject(value.average_scores));
   },
 
   async getAppGates(appId: string): Promise<AppMetadataGates> {
-    const res = await fetch(`${getBaseUrl()}/v1/inspector/apps/${encodeURIComponent(appId)}/gates`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}: failed to fetch app gates`);
-    return res.json();
+    const res = await request(`${getBaseUrl()}/v1/inspector/apps/${encodeURIComponent(appId)}/gates`);
+    return parseResponse(res, value => isObject(value) && Array.isArray(value.gates));
   },
 
   async updateAppGates(appId: string, gates: AppMetadataGates): Promise<AppMetadataGates> {
-    const res = await fetch(`${getBaseUrl()}/v1/inspector/apps/${encodeURIComponent(appId)}/gates`, {
+    const res = await request(`${getBaseUrl()}/v1/inspector/apps/${encodeURIComponent(appId)}/gates`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(gates)
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: failed to update app gates`);
-    return res.json();
+    return parseResponse(res, value => isObject(value) && Array.isArray(value.gates));
   },
 
   async matchMarketplace(req: MarketplaceMatchRequest): Promise<MarketplaceMatchResult> {
-    const res = await fetch(`${getBaseUrl()}/v1/marketplace/match`, {
+    const res = await request(`${getBaseUrl()}/v1/marketplace/match`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(req)
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: failed to match marketplace offers`);
-    return res.json();
+    return parseResponse(res, value => isObject(value) && Array.isArray(value.matched_offers) && value.matched_offers.every((match: any) => isObject(match.offer) && typeof match.total_payout === 'number' && Number.isFinite(match.total_payout)));
   },
 
   async classifyTelemetryEvent(event: TelemetryEvent): Promise<IntelligenceEventView> {
-    const res = await fetch(`${getBaseUrl()}/v1/intelligence/events`, {
+    const res = await request(`${getBaseUrl()}/v1/intelligence/events`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(event)
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: failed to classify event`);
-    return res.json();
+    return parseResponse(res, isObject);
   },
 
   async getEventIntelligence(eventId: string): Promise<IntelligenceEventView> {
-    const res = await fetch(`${getBaseUrl()}/v1/intelligence/events/${encodeURIComponent(eventId)}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}: failed to fetch event`);
-    return res.json();
+    const res = await request(`${getBaseUrl()}/v1/intelligence/events/${encodeURIComponent(eventId)}`);
+    return parseResponse(res, isObject);
   },
 
   async getEventMetadata(eventId: string): Promise<MetadataInspectionView> {
-    const res = await fetch(`${getBaseUrl()}/v1/inspector/events/${encodeURIComponent(eventId)}/metadata`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}: failed to fetch metadata`);
-    return res.json();
+    const res = await request(`${getBaseUrl()}/v1/inspector/events/${encodeURIComponent(eventId)}/metadata`);
+    return parseResponse(res, isObject);
   }
 };
 
