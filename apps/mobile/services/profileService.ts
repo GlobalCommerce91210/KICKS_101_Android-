@@ -1,3 +1,4 @@
+import { parseResponse, isObject, validWallet, ApiError, type RequestState } from './requestState.ts';
 import { SessionError, SessionManager } from './sessionCore.ts';
 
 type JsonObject = Record<string, any>;
@@ -20,35 +21,35 @@ export interface ConsumerProfileView {
   wallet: JsonObject | null;
   monitoring: JsonObject | null;
   unavailable: string[];
+  sources: Record<string, { state: RequestState; message?: string }>;
 }
 
 async function readJson(response: Response, label: string): Promise<JsonObject> {
-  if (!response.ok) throw new SessionError(`${label} is unavailable (HTTP ${response.status}).`);
-  try { return await response.json(); }
-  catch { throw new SessionError(`${label} returned an invalid response.`); }
+  return parseResponse(response, isObject);
 }
 
-async function optionalJson(
-  manager: SessionManager,
-  path: string,
-  label: string,
-  unavailable: string[]
-): Promise<JsonObject | null> {
+async function optionalJson(manager: SessionManager, path: string, label: string, unavailable: string[],
+  sources: ConsumerProfileView['sources'], validate: (value: any) => boolean = isObject,
+  empty: (value: any) => boolean = () => false): Promise<JsonObject | null> {
   try {
-    const response = await manager.request(path);
-    if (!response.ok) {
-      unavailable.push(label);
-      return null;
-    }
-    return await response.json();
+    const value = await parseResponse(await manager.request(path), validate);
+    sources[label] = { state: empty(value) ? 'EMPTY' : 'SUCCESS' };
+    return value;
   } catch (error) {
     if (!manager.user) throw error;
     unavailable.push(label);
+    sources[label] = { state: error instanceof ApiError ? error.state : 'UNAVAILABLE',
+      message: error instanceof ApiError ? error.message : 'Service unavailable. Refresh to retry.' };
     return null;
   }
 }
+const list = (key: string) => (value: any) => {
+  const items = Array.isArray(value) ? value : isObject(value) ? value[key] : null;
+  return Array.isArray(items) && items.every(item => isObject(item) && typeof item[key === 'devices' ? 'device_id' : 'log_id'] === 'string');
+};
+const emptyList = (key: string) => (value: any) => (Array.isArray(value) ? value : value[key]).length === 0;
 
-export async function loadConsumerProfile(manager: SessionManager): Promise<ConsumerProfileView> {
+async function hydrateConsumerProfile(manager: SessionManager): Promise<ConsumerProfileView> {
   const user = manager.user;
   if (!user) throw new SessionError('Sign in to continue.');
 
@@ -71,14 +72,14 @@ export async function loadConsumerProfile(manager: SessionManager): Promise<Cons
   if (manager.user !== user) throw new SessionError('Your session changed. Sign in again.');
 
   const unavailable: string[] = [];
-  const encodedSubject = encodeURIComponent(user.subjectId);
+  const sources: ConsumerProfileView['sources'] = {};
   const [consumerState, snapshot, devicesView, permissions, consent, wallet] = await Promise.all([
-    optionalJson(manager, '/v1/me/consumer-state', 'consumer state', unavailable),
-    optionalJson(manager, '/core/consumer/v1/snapshot', 'consumer snapshot', unavailable),
-    optionalJson(manager, '/core/consumer/v1/devices', 'connected devices', unavailable),
-    optionalJson(manager, '/core/consumer/v1/permissions/effective', 'permissions', unavailable),
-    optionalJson(manager, '/core/consumer/v1/permissions/consent-log?page=1&page_size=25', 'consent history', unavailable),
-    optionalJson(manager, '/core/consumer/v1/wallet', 'wallet', unavailable)
+    optionalJson(manager, '/v1/me/consumer-state', 'consumer state', unavailable, sources),
+    optionalJson(manager, '/core/consumer/v1/snapshot', 'consumer snapshot', unavailable, sources),
+    optionalJson(manager, '/core/consumer/v1/devices', 'connected devices', unavailable, sources, list('devices'), emptyList('devices')),
+    optionalJson(manager, '/core/consumer/v1/permissions/effective', 'permissions', unavailable, sources, value => isObject(value) && Array.isArray(value.apps), value => value.apps.length === 0),
+    optionalJson(manager, '/core/consumer/v1/permissions/consent-log?page=1&page_size=25', 'consent history', unavailable, sources, list('items'), emptyList('items')),
+    optionalJson(manager, '/core/consumer/v1/wallet', 'wallet', unavailable, sources, validWallet)
   ]);
 
   const devices = Array.isArray(devicesView) ? devicesView : Array.isArray(devicesView?.devices) ? devicesView.devices : [];
@@ -104,6 +105,19 @@ export async function loadConsumerProfile(manager: SessionManager): Promise<Cons
     consentLog,
     wallet,
     monitoring,
+    sources,
     unavailable: [...new Set(unavailable)]
   };
+}
+
+// Share only in-flight reads for this exact verified session; never cache authorization.
+const flights = new WeakMap<SessionManager, { user: object | null; generation: number; promise: Promise<ConsumerProfileView> }>();
+export function loadConsumerProfile(manager: SessionManager): Promise<ConsumerProfileView> {
+  const existing = flights.get(manager);
+  if (existing && existing.user === manager.user && existing.generation === manager.sessionGeneration) return existing.promise;
+  const promise = hydrateConsumerProfile(manager);
+  const entry = { user: manager.user, generation: manager.sessionGeneration, promise };
+  flights.set(manager, entry);
+  void promise.finally(() => { if (flights.get(manager) === entry) flights.delete(manager); }).catch(() => {});
+  return promise;
 }

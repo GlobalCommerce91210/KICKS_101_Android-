@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -73,6 +73,8 @@ const METADATA_TYPE_LABELS: Record<MetadataType, { title: string; desc: string; 
 export default function Opportunities() {
   const [selectedApp, setSelectedApp] = useState<AppOption>(APPS[0]!);
   const [activeTab, setActiveTab] = useState<'marketplace' | 'gates' | 'inspector'>('marketplace');
+  const [error, setError] = useState<string | null>(null);
+  const generation = useRef(0);
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<AppIntelligenceSummary | null>(null);
   const [gates, setGates] = useState<AppMetadataGates | null>(null);
@@ -96,25 +98,28 @@ export default function Opportunities() {
 
   // Load app summary, gates, and marketplace matches
   const loadAppData = async (appId: string) => {
-    setLoading(true);
+    const id = ++generation.current;
+    setLoading(true); setError(null);
     try {
       const [sum, gateConfig, matches] = await Promise.all([
         api.getAppSummary(appId),
         api.getAppGates(appId),
         api.matchMarketplace({ app_id: appId })
       ]);
+      if (id !== generation.current) return;
       setSummary(sum);
       setGates(gateConfig);
       setMatchResult(matches);
     } catch (err) {
-      console.warn('Could not reach API directly, generating structured view', err);
+      if (id === generation.current) setError('Shopping and rewards data could not be verified. Refresh to retry.');
     } finally {
-      setLoading(false);
+      if (id === generation.current) setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadAppData(selectedApp.id);
+    void loadAppData(selectedApp.id);
+    return () => { ++generation.current; };
   }, [selectedApp.id]);
 
   // Run matching engine
@@ -127,7 +132,7 @@ export default function Opportunities() {
       const sum = await api.getAppSummary(selectedApp.id);
       setSummary(sum);
     } catch (err) {
-      console.warn('Marketplace match failed', err);
+      setError('The service could not confirm this action. Refresh before retrying.');
     } finally {
       setMatching(false);
     }
@@ -168,7 +173,7 @@ export default function Opportunities() {
       const sum = await api.getAppSummary(selectedApp.id);
       setSummary(sum);
     } catch (err) {
-      console.warn('Failed to update gate', err);
+      setError('The service could not confirm this action. Refresh before retrying.');
     } finally {
       setUpdatingGate(null);
     }
@@ -211,11 +216,16 @@ export default function Opportunities() {
       const sum = await api.getAppSummary(selectedApp.id);
       setSummary(sum);
     } catch (err) {
-      console.warn('Failed to classify event', err);
+      setError('The service could not confirm this action. Refresh before retrying.');
     } finally {
       setClassifying(false);
     }
   };
+
+  if (loading || error || !summary || !gates || !matchResult) return <Screen>
+    <BrandHeader section="Shopping & rewards" />
+    {loading ? <ActivityIndicator color={colors.orange} /> : <Card><Text accessibilityRole="alert" style={ui.body}>{error ?? 'Shopping data unavailable.'}</Text><Pressable onPress={() => { void loadAppData(selectedApp.id); }}><Text style={ui.label}>RETRY</Text></Pressable></Card>}
+  </Screen>;
 
   const currentGatesList = gates?.gates ?? [];
   const allowedCount = currentGatesList.filter(g => g.default_state === 'allowed').length;
@@ -283,7 +293,7 @@ export default function Opportunities() {
               <View style={s.valuePill}>
                 <Text style={s.valueLabel}>MATCH VALUE</Text>
                 <Text style={s.valueAmount}>
-                  ${summary?.total_estimated_value?.toFixed(2) ?? '8.00'}
+                  ${summary?.total_estimated_value?.toFixed(2) ?? '—'}
                 </Text>
               </View>
             </View>
@@ -293,7 +303,7 @@ export default function Opportunities() {
               <View style={s.metricItem}>
                 <Text style={s.metricHeader}>COMMERCIAL INTENT</Text>
                 <Text style={[s.metricVal, { color: colors.orange }]}>
-                  {summary?.average_scores.commercial_intent_score?.toFixed(1) ?? '88.5'}
+                  {summary?.average_scores.commercial_intent_score?.toFixed(1) ?? '—'}
                   <Text style={s.metricUnit}>/100</Text>
                 </Text>
               </View>
@@ -301,7 +311,7 @@ export default function Opportunities() {
               <View style={s.metricItem}>
                 <Text style={s.metricHeader}>PURPOSE CONFIDENCE</Text>
                 <Text style={[s.metricVal, { color: colors.green }]}>
-                  {summary?.average_scores.purpose_confidence_score?.toFixed(1) ?? '96.5'}%
+                  {summary?.average_scores.purpose_confidence_score?.toFixed(1) ?? '—'}%
                 </Text>
               </View>
               <View style={s.metricDivider} />
@@ -765,7 +775,7 @@ export default function Opportunities() {
                   <Text style={s.cancelBtnText}>Dismiss</Text>
                 </Pressable>
                 <Pressable
-                  onPress={() => setOfferAccepted(true)}
+                  onPress={() => setError('Study enrollment is unavailable: no authenticated acceptance API is configured. No agreement or payment has been recorded.')}
                   style={s.acceptBtn}
                 >
                   <Text style={s.acceptBtnText}>Grant & Connect</Text>

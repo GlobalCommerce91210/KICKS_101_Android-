@@ -67,12 +67,13 @@ export default function MyDevices() {
     </Card>
     <Card>
       <Text style={ui.h2}>Linked devices</Text>
+      {error && profile && <Text accessibilityRole="alert" style={ui.body}>Previously loaded devices · stale. Refresh before taking action.</Text>}
       {!profile ? <Text style={ui.body}>Refresh to load devices.</Text> : profile.unavailable.includes('connected devices') ? <Text accessibilityRole="alert" style={ui.body}>Device service unavailable. Check your connection and refresh.</Text> : profile.devices.length === 0 ? <Text style={ui.body}>No linked devices.</Text> : profile.devices.map(device => <Card key={device.device_id}>
         <Text style={ui.h2}>{device.display_name ?? device.platform ?? 'Device'}</Text>
         <Text style={ui.body}>Device: {device.device_id}</Text>
         <Text style={ui.body}>Collector: {device.collector_status ?? 'unknown'} · Monitoring: {device.monitoring_status ?? 'unavailable'}</Text>
         <Text style={ui.body}>Last observation: {device.last_seen_at ?? 'None verified'}</Text>
-        <Pressable accessibilityRole="button" disabled={busy || collectionBusy} style={{minHeight:44,justifyContent:'center'}} onPress={() => Alert.alert('Revoke collection and unlink?', 'Withdraw this build’s collection permission and unlink this device. Existing app data and credentials are preserved. Other sharing permissions can be reviewed in Permissions.', [
+        <Pressable accessibilityRole="button" disabled={busy || collectionBusy || !!error} style={{minHeight:44,justifyContent:'center'}} onPress={() => Alert.alert('Revoke collection and unlink?', 'Withdraw this build’s collection permission and unlink this device. Existing app data and credentials are preserved. Other sharing permissions can be reviewed in Permissions.', [
           { text: 'Cancel', style: 'cancel' }, { text: 'Revoke and unlink', style: 'destructive', onPress: () => { void run(() => revokeAndUnlinkDevice(manager, device.device_id, policy, native, randomUUID())); } },
         ])}><Text style={ui.label}>REVOKE & UNLINK</Text></Pressable>
       </Card>)}
