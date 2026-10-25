@@ -19,6 +19,7 @@ export interface CollectorStatus {
 
 type NativeCollectorModule = {
   getStatus(): Promise<CollectorStatus>;
+  verifyBackendEligibility(apiBaseUrl: string, deviceToken: string, permissionId: string, purpose: string, activationRequested: boolean): Promise<{ eligible: boolean; backendEligible?: boolean; reason: string }>;
   requestAuthorization(): Promise<'authorized' | 'authorization_opened'>;
   start(): Promise<'starting'>;
   stop(): Promise<'stopping'>;
@@ -52,7 +53,15 @@ export const collectorApi = {
       return unavailable;
     }
   },
-  async verifyBackendEligibility(apiBaseUrl: string, deviceToken: string, permissionId: string, purpose: string) {\n    if (Platform.OS !== 'android' || !native) return { eligible: false, reason: 'collector_unavailable' };\n    try {\n      return await native.verifyBackendEligibility(apiBaseUrl, deviceToken, permissionId, purpose, true);\n    } catch {\n      return { eligible: false, reason: 'backend_verification_unavailable' };\n    }\n  },\n  async requestAuthorization() {
+  async verifyBackendEligibility(apiBaseUrl: string, deviceToken: string, permissionId: string, purpose: string) {
+    if (Platform.OS !== 'android' || !native) return { eligible: false, reason: 'collector_unavailable' };
+    try {
+      return await native.verifyBackendEligibility(apiBaseUrl, deviceToken, permissionId, purpose, true);
+    } catch {
+      return { eligible: false, reason: 'backend_verification_unavailable' };
+    }
+  },
+  async requestAuthorization() {
     if (Platform.OS !== 'android' || !native) throw new Error('Android VPN collector unavailable on this platform.');
     if (Number(Platform.Version) >= 33) {
       const permission = PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS;
