@@ -46,7 +46,7 @@ export class PostgresConsentRepository implements ConsentRepository {
       );
       if (duplicate.rows[0]) {
         const row = duplicate.rows[0];
-        if (row.subject_id !== input.subjectId || row.permission_id !== input.permissionId || row.action !== input.action || row.policy_version !== input.policyVersion || row.purpose_version !== input.purposeVersion || row.purpose !== input.purpose || (row.expected_event_sequence ?? undefined) !== input.expectedEventSequence) {
+        if (row.subject_id !== input.subjectId || row.permission_id !== input.permissionId || row.action !== input.action || row.policy_version !== input.policyVersion || row.purpose_version !== input.purposeVersion || row.purpose !== input.purpose || (row.expected_event_sequence === null ? undefined : Number(row.expected_event_sequence)) !== input.expectedEventSequence) {
           const error = new Error('idempotency_key_reused_with_different_request');
           (error as Error & { code?: string }).code = 'IDEMPOTENCY_CONFLICT';
           throw error;
