@@ -27,3 +27,8 @@ Development, staging, and production use separate credentials, databases, identi
 ## Launch evidence
 
 A release is blocked until the lifecycle succeeds end to end: real MFA, KYC, consent grant, one opportunity, versioned agreement, minimized data result, immutable reward entry, sandbox payout, revocation enforcement, audit export, backup restore, and negative authorization tests.
+
+
+## KICK-011C — collector authorization release gate
+
+All collector-derived data must pass the shared backend `CollectorAuthorizationService` boundary using authoritative current consent, immutable receipt linkage, independently verified blockchain proof and finality, enrolled device, server-verified OS permissions, current policy/disclosure, and revocation state. Client eligibility is informational only. Metadata ingestion must reauthorize inside the same database transaction/locking domain as the commit. The verifier/database adapter is not wired in this branch; absence is a hard deny. Native collection remains disabled, and no production deployment is approved until KICK-011A/B dependencies and concurrency/restart tests pass.
