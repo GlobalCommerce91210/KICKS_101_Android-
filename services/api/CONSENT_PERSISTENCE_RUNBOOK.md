@@ -23,3 +23,11 @@
 Retries must be bounded and use the same request ID for the same logical decision. A retry must not mint a new permission decision. Do not fall back to in-memory consent or device identity in the deployed API. Diagnostics must exclude bearer tokens and sensitive metadata.
 
 Automated typecheck, unit tests, and database-backed integration/restart tests are release gates. Do not mark KICK-011A complete until those checks have passing results.
+
+## KICK-011A.3 — Pause, retry, and recovery policy
+
+- **Pause:** On HTTP 503 or a persistence/verification outage, do not treat the decision as saved. Stop protected ingestion and surface a retryable state. The API returns `Retry-After: 1` as the minimum pause before a retry attempt.
+- **Retry:** Retry the exact same logical decision with the exact same `requestId` and payload. Use bounded exponential backoff with jitter in the caller; stop after the caller's retry budget and leave the decision pending for explicit recovery.
+- **Hard retry / recovery:** After service health returns, retry the same request ID again. PostgreSQL idempotency must return the original event if the first attempt committed, or create one event if it did not. Never generate a new request ID just because the response timed out.
+- **Do not retry:** HTTP 400 (invalid request), 401 (authentication), 403 (consent/permission denial), and 409 (stale decision or idempotency conflict) require correction or a fresh user decision; automatic retries must not bypass these outcomes.
+- A retry response must not imply success until the authoritative persisted event has been returned. Do not fall back to in-memory state when PostgreSQL is configured.
