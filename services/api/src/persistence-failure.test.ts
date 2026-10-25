@@ -90,6 +90,7 @@ test('consent history outage returns retryable 503', async () => {
   const app = buildServer({
     adminSecret: 'failure-test-secret',
     deviceRepository: deviceRepository(),
+    collectorVerifier: { verify: async () => true },
     consentRepository: consentRepository({
       getHistory: async () => { throw new Error('simulated consent read outage'); }
     })
@@ -107,10 +108,11 @@ test('consent history outage returns retryable 503', async () => {
   }
 });
 
-test('consent verification outage fails closed for metadata ingestion', async () => {
+test('consent storage without an atomic metadata repository fails closed', async () => {
   const app = buildServer({
     adminSecret: 'failure-test-secret',
     deviceRepository: deviceRepository(),
+    collectorVerifier: { verify: async () => true },
     consentRepository: consentRepository({
       getCurrent: async () => { throw new Error('simulated consent verification outage'); }
     })
@@ -123,7 +125,7 @@ test('consent verification outage fails closed for metadata ingestion', async ()
       headers,
       payload: {
         batchId: randomUUID(),
-        schemaVersion: '2026-08-01',
+        schemaVersion: '2026-10-25',
         observations: [{
           eventId: randomUUID(),
           occurredAt: new Date().toISOString(),
@@ -134,13 +136,58 @@ test('consent verification outage fails closed for metadata ingestion', async ()
           bytesBucket: '1-10KB',
           classification: 'expected',
           consentId: permissionId,
-          consentPurpose: consentInput.purpose
+          consentPurpose: consentInput.purpose,
+          consentPolicyVersion: consentInput.policyVersion,
+          consentPurposeVersion: consentInput.purposeVersion
         }]
       }
     });
     assert.equal(response.statusCode, 503);
     assert.equal(response.headers['retry-after'], '1');
-    assert.equal(response.json().error, 'consent_verification_unavailable');
+    assert.equal(response.json().error, 'metadata_persistence_unavailable');
+  } finally {
+    await app.close();
+  }
+});
+
+test('metadata persistence outage returns retryable 503 without accepting a batch', async () => {
+  const app = buildServer({
+    adminSecret: 'failure-test-secret',
+    deviceRepository: deviceRepository(),
+    collectorVerifier: { verify: async () => true },
+    metadataRepository: {
+      ingestBatch: async () => { throw new Error('simulated metadata database outage'); }
+    }
+  });
+  try {
+    const headers = await enroll(app);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/metadata-batches',
+      headers,
+      payload: {
+        batchId: randomUUID(),
+        schemaVersion: '2026-10-25',
+        observations: [{
+          eventId: randomUUID(),
+          occurredAt: new Date().toISOString(),
+          sourceApp: 'com.example.test',
+          attribution: 'verified',
+          destinationHost: 'api.example.com',
+          protocol: 'tls',
+          bytesBucket: '1-10KB',
+          classification: 'expected',
+          consentId: permissionId,
+          consentPurpose: consentInput.purpose,
+          consentPolicyVersion: consentInput.policyVersion,
+          consentPurposeVersion: consentInput.purposeVersion
+        }]
+      }
+    });
+    assert.equal(response.statusCode, 503);
+    assert.equal(response.headers['retry-after'], '1');
+    assert.equal(response.json().error, 'metadata_persistence_unavailable');
+    assert.equal(response.json().retryable, true);
   } finally {
     await app.close();
   }

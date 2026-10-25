@@ -23,6 +23,8 @@ CREATE TABLE metadata_batches (
 );
 CREATE TABLE metadata_observations (
   id uuid PRIMARY KEY, batch_id uuid NOT NULL REFERENCES metadata_batches(id), consent_id uuid NOT NULL,
+  consent_event_id uuid NOT NULL REFERENCES consent_events(id),
+  consent_policy_version text NOT NULL, consent_purpose_version text NOT NULL,
   occurred_at timestamptz NOT NULL, source_app text, attribution text NOT NULL CHECK (attribution IN ('verified','best_effort','unknown')),
   destination_host text NOT NULL, protocol text NOT NULL, bytes_bucket text NOT NULL, classification text NOT NULL, consent_purpose text NOT NULL,
   CHECK (destination_host !~ '[/?:#]')

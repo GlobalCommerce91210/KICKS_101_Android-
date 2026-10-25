@@ -29,13 +29,34 @@ import type { DeviceRepository } from './device-repository.js';
 import type { MetadataRepository } from './metadata-repository.js';
 
 type Device={id:string;subjectId:string;tokenHash:string;revoked:boolean};type Consent={id:string;subjectId:string;purpose:string;policyVersion:string;purposeVersion:string;state:'granted'|'revoked'};
-const observation=z.object({eventId:z.string().uuid(),occurredAt:z.string().datetime(),sourceApp:z.string().min(1).max(180).nullable(),attribution:z.enum(['verified','best_effort','unknown']),destinationHost:z.string().regex(/^(?=.{1,253}$)(?!-)[a-z0-9.-]+(?<!-)$/),protocol:z.enum(['dns','tcp','udp','tls','quic','other']),bytesBucket:z.enum(['0-1KB','1-10KB','10-100KB','100KB-1MB','1MB+']),classification:z.enum(['expected','review','unpermissioned','unknown']),consentId:z.string().uuid(),consentPurpose:z.string().min(3).max(120)}).strict();
+const observation=z.object({eventId:z.string().uuid(),occurredAt:z.string().datetime(),sourceApp:z.string().min(1).max(180).nullable(),attribution:z.enum(['verified','best_effort','unknown']),destinationHost:z.string().regex(/^(?=.{1,253}$)(?!-)[a-z0-9.-]+(?<!-)$/),protocol:z.enum(['dns','tcp','udp','tls','quic','other']),bytesBucket:z.enum(['0-1KB','1-10KB','10-100KB','100KB-1MB','1MB+']),classification:z.enum(['expected','review','unpermissioned','unknown']),consentId:z.string().uuid(),consentPurpose:z.string().min(3).max(120),consentPolicyVersion:z.string().min(1).max(64),consentPurposeVersion:z.string().min(1).max(64)}).strict();
 type Observation=z.infer<typeof observation>;export interface Store{devices:Map<string,Device>;consents:Map<string,Consent>;consentHistory:ConsentEvent[];consentRequests:Map<string,ConsentEvent>;batches:Set<string>;observations:Observation[]};export const memoryStore=():Store=>({devices:new Map(),consents:new Map(),consentHistory:[],consentRequests:new Map(),batches:new Set(),observations:[]});
 const hash=(v:string)=>createHash('sha256').update(v).digest('hex');const equal=(a:string,b:string)=>{const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length&&timingSafeEqual(x,y)};
 const decision=z.object({permissionId:z.string().uuid(),requestId:z.string().uuid(),expectedEventSequence:z.number().int().nonnegative().optional(),action:z.enum(['grant','deny','revoke']),policyVersion:z.string().min(1).max(64),purposeVersion:z.string().min(1).max(64),purpose:z.string().min(3).max(120)}).strict();
-const batch=z.object({batchId:z.string().uuid(),schemaVersion:z.literal('2026-08-01'),observations:z.array(observation).min(1).max(250)}).strict();
+const batch=z.object({batchId:z.string().uuid(),schemaVersion:z.literal('2026-10-25'),observations:z.array(observation).min(1).max(250)}).strict();
 
-export function buildServer(options:{store?:Store;adminSecret?:string;intelligenceEngine?:IntelligenceEngine;walletEngine?:WalletEngine;permissionsEngine?:PermissionsEngine;consentRepository?:ConsentRepository;deviceRepository?:DeviceRepository;metadataRepository?:MetadataRepository}={}){
+export type CollectorVerificationRequest = {
+  deviceId: string;
+  subjectId: string;
+  batchId: string;
+  permissionId: string;
+  purpose: string;
+  policyVersion: string;
+  purposeVersion: string;
+  observationIds: string[];
+  // Required checks are independently sourced, not client claims or eligibility results.
+  verificationRequirements: {
+    currentCollectorIdentityAndState: true;
+    currentOsPermission: true;
+    explicitActivation: true;
+  };
+};
+export interface CollectorVerifier {
+  // A true result must independently verify current collector identity/state, OS permission, and activation for this exact device, subject, permission, and version scope.
+  verify(request: CollectorVerificationRequest): Promise<boolean>;
+}
+
+export function buildServer(options:{store?:Store;adminSecret?:string;intelligenceEngine?:IntelligenceEngine;walletEngine?:WalletEngine;permissionsEngine?:PermissionsEngine;consentRepository?:ConsentRepository;deviceRepository?:DeviceRepository;metadataRepository?:MetadataRepository;collectorVerifier?:CollectorVerifier}={}){
   const store=options.store??memoryStore();
   const adminSecret=options.adminSecret??process.env.KICKS_STAGING_ADMIN_SECRET??'';
   const engine = options.intelligenceEngine ?? new IntelligenceEngine();
@@ -118,7 +139,92 @@ export function buildServer(options:{store?:Store;adminSecret?:string;intelligen
   });
   app.post('/v1/collector/eligibility',async(q,r)=>{let device: Awaited<ReturnType<typeof authenticate>>;try{device=await authenticate(q.headers.authorization)}catch(error){q.log.error({err:error},'collector eligibility device authentication unavailable');return r.header('retry-after','1').code(503).send({eligible:false,error:'device_authentication_unavailable',retryable:true})}if(!device)return r.code(401).send({eligible:false,error:'unauthorized'});const parsed=z.object({permissionId:z.string().uuid(),purpose:z.string().min(3).max(120),activationRequested:z.literal(true)}).strict().safeParse(q.body);if(!parsed.success)return r.code(400).send({eligible:false,error:'invalid_request'});try{let current:Consent|null=store.consents.get(parsed.data.permissionId)??null;if(options.consentRepository){const persisted=await options.consentRepository.getCurrent(parsed.data.permissionId);current=persisted?{...persisted}:null}if(!current||current.subjectId!==device.subjectId||current.state!=='granted'||current.purpose!==parsed.data.purpose)return r.code(403).send({eligible:false,error:'active_purpose_consent_required'});return r.code(200).send({eligible:true,deviceId:device.id,permissionId:current.id,purpose:current.purpose,monitoringDefaultOn:false})}catch(error){q.log.error({err:error},'collector eligibility consent check failed');return r.header('retry-after','1').code(503).send({eligible:false,error:'consent_verification_unavailable',retryable:true})}});
   app.get('/v1/consent-events/:permissionId',async(q,r)=>{let device: Awaited<ReturnType<typeof authenticate>>;try{device=await authenticate(q.headers.authorization)}catch(error){q.log.error({err:error},'device authentication unavailable');return r.header('retry-after','1').code(503).send({error:'device_authentication_unavailable',retryable:true})}if(!device)return r.code(401).send({error:'unauthorized'});const params=z.object({permissionId:z.string().uuid()}).safeParse(q.params);if(!params.success)return r.code(400).send({error:'invalid_request'});try{if(options.consentRepository){const events=await options.consentRepository.getHistory(params.data.permissionId,device.subjectId);return r.code(200).send({permissionId:params.data.permissionId,events})}const events=store.consentHistory.filter(e=>e.permissionId===params.data.permissionId&&e.subjectId===device.subjectId);return r.code(200).send({permissionId:params.data.permissionId,events})}catch(error){q.log.error({err:error},'consent history read failed');return r.header('retry-after','1').code(503).send({error:'consent_persistence_unavailable',retryable:true})}});
-  app.post('/v1/metadata-batches',async(q,r)=>{let device: Awaited<ReturnType<typeof authenticate>>;try{device=await authenticate(q.headers.authorization)}catch(error){q.log.error({err:error},'device authentication unavailable');return r.header('retry-after','1').code(503).send({error:'device_authentication_unavailable',retryable:true})}if(!device)return r.code(401).send({error:'unauthorized'});const parsed=batch.safeParse(q.body);if(!parsed.success)return r.code(400).send({error:'invalid_or_non_minimized_metadata',issues:parsed.error.issues});if(options.metadataRepository){try{const result=await options.metadataRepository.ingestBatch(device,parsed.data);return r.code(202).send(result)}catch(error){const code=(error as {code?:string})?.code;if(code==='BATCH_REPLAY')return r.code(409).send({error:'replay_detected'});if(code==='ACTIVE_PURPOSE_CONSENT_REQUIRED')return r.code(403).send({error:'active_purpose_consent_required'});if(code==='DEVICE_NOT_ACTIVE')return r.code(401).send({error:'device_not_active'});q.log.error({err:error},'metadata persistence failed');return r.header('retry-after','1').code(503).send({error:'metadata_persistence_unavailable',retryable:true})}}if(store.batches.has(parsed.data.batchId))return r.code(409).send({error:'replay_detected'});for(const item of parsed.data.observations){let consent:Consent|null=store.consents.get(item.consentId)??null;if(options.consentRepository){try{const current=await options.consentRepository.getCurrent(item.consentId);consent=current?{...current}:null}catch(error){q.log.error({err:error},'consent verification failed');return r.header('retry-after','1').code(503).send({error:'consent_verification_unavailable',retryable:true})}}if(!consent||consent.subjectId!==device.subjectId||consent.state!=='granted'||consent.purpose!==item.consentPurpose)return r.code(403).send({error:'active_purpose_consent_required',eventId:item.eventId})}store.batches.add(parsed.data.batchId);store.observations.push(...parsed.data.observations);return r.code(202).send({batchId:parsed.data.batchId,accepted:parsed.data.observations.length})});
+  app.post('/v1/metadata-batches', async (q, r) => {
+    let device: Awaited<ReturnType<typeof authenticate>>;
+    try {
+      device = await authenticate(q.headers.authorization);
+    } catch (error) {
+      q.log.error({ err: error }, 'device authentication unavailable');
+      return r.header('retry-after', '1').code(503).send({ error: 'device_authentication_unavailable', retryable: true });
+    }
+    if (!device) return r.code(401).send({ error: 'unauthorized' });
+    const parsed = batch.safeParse(q.body);
+    if (!parsed.success) return r.code(400).send({ error: 'invalid_or_non_minimized_metadata', issues: parsed.error.issues });
+    if (!options.collectorVerifier) {
+      q.log.error('metadata ingestion blocked because no collector verifier is configured');
+      return r.header('retry-after', '1').code(503).send({ error: 'collector_verification_unavailable', retryable: true });
+    }
+
+    const verificationScopes = new Map<string, CollectorVerificationRequest>();
+    for (const item of parsed.data.observations) {
+      const scope = {
+        deviceId: device.id,
+        subjectId: device.subjectId,
+        batchId: parsed.data.batchId,
+        permissionId: item.consentId,
+        purpose: item.consentPurpose,
+        policyVersion: item.consentPolicyVersion,
+        purposeVersion: item.consentPurposeVersion,
+        observationIds: [] as string[],
+        verificationRequirements: {
+          currentCollectorIdentityAndState: true as const,
+          currentOsPermission: true as const,
+          explicitActivation: true as const
+        }
+      };
+      const key = JSON.stringify([
+        scope.deviceId,
+        scope.subjectId,
+        scope.batchId,
+        scope.permissionId,
+        scope.purpose,
+        scope.policyVersion,
+        scope.purposeVersion
+      ]);
+      const existing = verificationScopes.get(key) ?? scope;
+      existing.observationIds.push(item.eventId);
+      verificationScopes.set(key, existing);
+    }
+    try {
+      for (const scope of verificationScopes.values()) {
+        if (await options.collectorVerifier.verify(scope) !== true) {
+          return r.code(403).send({ error: 'collector_verification_failed' });
+        }
+      }
+    } catch (error) {
+      q.log.error({ err: error }, 'collector verification unavailable');
+      return r.header('retry-after', '1').code(503).send({ error: 'collector_verification_unavailable', retryable: true });
+    }
+
+    if (options.consentRepository && !options.metadataRepository) {
+      return r.header('retry-after', '1').code(503).send({ error: 'metadata_persistence_unavailable', retryable: true });
+    }
+    if (options.metadataRepository) {
+      try {
+        const result = await options.metadataRepository.ingestBatch(device, parsed.data);
+        return r.code(202).send(result);
+      } catch (error) {
+        const code = (error as { code?: string })?.code;
+        if (code === 'BATCH_REPLAY') return r.code(409).send({ error: 'replay_detected' });
+        if (code === 'ACTIVE_PURPOSE_CONSENT_REQUIRED') return r.code(403).send({ error: 'active_purpose_consent_required' });
+        if (code === 'DEVICE_NOT_ACTIVE') return r.code(401).send({ error: 'device_not_active' });
+        q.log.error({ err: error }, 'metadata persistence failed');
+        return r.header('retry-after', '1').code(503).send({ error: 'metadata_persistence_unavailable', retryable: true });
+      }
+    }
+    if (store.batches.has(parsed.data.batchId)) return r.code(409).send({ error: 'replay_detected' });
+    for (const item of parsed.data.observations) {
+      const consent: Consent | null = store.consents.get(item.consentId) ?? null;
+      if (!consent || consent.subjectId !== device.subjectId || consent.state !== 'granted' ||
+        consent.purpose !== item.consentPurpose || consent.policyVersion !== item.consentPolicyVersion ||
+        consent.purposeVersion !== item.consentPurposeVersion) {
+        return r.code(403).send({ error: 'active_purpose_consent_required', eventId: item.eventId });
+      }
+    }
+    store.batches.add(parsed.data.batchId);
+    store.observations.push(...parsed.data.observations);
+    return r.code(202).send({ batchId: parsed.data.batchId, accepted: parsed.data.observations.length });
+  });
 
   // Intelligence & Value Engine Endpoints
   app.post('/v1/intelligence/events', async (req, reply) => {

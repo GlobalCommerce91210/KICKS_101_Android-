@@ -12,10 +12,12 @@ export type MetadataObservation = {
   classification: 'expected' | 'review' | 'unpermissioned' | 'unknown';
   consentId: string;
   consentPurpose: string;
+  consentPolicyVersion: string;
+  consentPurposeVersion: string;
 };
 export type MetadataBatch = {
   batchId: string;
-  schemaVersion: '2026-08-01';
+  schemaVersion: '2026-10-25';
   observations: MetadataObservation[];
 };
 export interface MetadataRepository {
@@ -30,8 +32,8 @@ export class PostgresMetadataRepository implements MetadataRepository {
     try {
       await client.query('BEGIN');
       const activeDevice = await client.query<{ id: string }>(
-        'SELECT id FROM devices WHERE id = $1 AND subject_id = $2 AND revoked_at IS NULL FOR UPDATE',
-        [device.id, device.subjectId]
+        'SELECT id FROM devices WHERE id = $1 AND subject_id = $2 AND token_hash = $3 AND revoked_at IS NULL FOR UPDATE',
+        [device.id, device.subjectId, device.tokenHash]
       );
       if (!activeDevice.rows[0]) {
         const error = new Error('device_not_active');
@@ -40,6 +42,7 @@ export class PostgresMetadataRepository implements MetadataRepository {
       }
 
       const permissionIds = [...new Set(batch.observations.map(item => item.consentId))].sort();
+      const activeConsentEvents = new Map<string, string>();
       for (const permissionId of permissionIds) {
         // Share the same permission-stream lock as consent grant/revoke writes.
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`permission:${permissionId}`]);
@@ -47,19 +50,23 @@ export class PostgresMetadataRepository implements MetadataRepository {
 
       for (const permissionId of permissionIds) {
         const latest = await client.query<{
-          subject_id: string; action: 'grant' | 'deny' | 'revoke'; purpose: string;
+          id: string; subject_id: string; action: 'grant' | 'deny' | 'revoke';
+          purpose: string; policy_version: string; purpose_version: string;
         }>(
-          'SELECT subject_id, action, purpose FROM consent_events WHERE permission_id = $1 ORDER BY event_sequence DESC LIMIT 1',
+          'SELECT id, subject_id, action, purpose, policy_version, purpose_version FROM consent_events WHERE permission_id = $1 ORDER BY event_sequence DESC LIMIT 1',
           [permissionId]
         );
         const consent = latest.rows[0];
         const matching = batch.observations.filter(item => item.consentId === permissionId);
         if (!consent || consent.subject_id !== device.subjectId || consent.action !== 'grant' ||
-          matching.some(item => item.consentPurpose !== consent.purpose)) {
+          matching.some(item => item.consentPurpose !== consent.purpose ||
+            item.consentPolicyVersion !== consent.policy_version ||
+            item.consentPurposeVersion !== consent.purpose_version)) {
           const error = new Error('active_purpose_consent_required');
           (error as Error & { code?: string }).code = 'ACTIVE_PURPOSE_CONSENT_REQUIRED';
           throw error;
         }
+        activeConsentEvents.set(permissionId, consent.id);
       }
 
       await client.query(
@@ -69,10 +76,13 @@ export class PostgresMetadataRepository implements MetadataRepository {
       for (const item of batch.observations) {
         await client.query(
           `INSERT INTO metadata_observations
-            (id, batch_id, consent_id, occurred_at, source_app, attribution, destination_host, protocol, bytes_bucket, classification, consent_purpose)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-          [item.eventId, batch.batchId, item.consentId, item.occurredAt, item.sourceApp, item.attribution,
-            item.destinationHost, item.protocol, item.bytesBucket, item.classification, item.consentPurpose]
+            (id, batch_id, consent_id, consent_event_id, consent_policy_version, consent_purpose_version,
+             occurred_at, source_app, attribution, destination_host, protocol, bytes_bucket, classification, consent_purpose)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+          [item.eventId, batch.batchId, item.consentId, activeConsentEvents.get(item.consentId),
+            item.consentPolicyVersion, item.consentPurposeVersion, item.occurredAt, item.sourceApp,
+            item.attribution, item.destinationHost, item.protocol, item.bytesBucket, item.classification,
+            item.consentPurpose]
         );
       }
       await client.query('COMMIT');
