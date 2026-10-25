@@ -58,20 +58,27 @@ class KicksVpnModule(private val context: ReactApplicationContext) : ReactContex
         var response = "{}"
         // Bounded retry of the same eligibility request after a retryable service outage.
         for (attempt in 0..2) {
-          connection = URL(base.toString().trimEnd('/') + "/v1/collector/eligibility").openConnection() as HttpURLConnection
-          connection.requestMethod = "POST"
-          connection.connectTimeout = 5000
-          connection.readTimeout = 5000
-          connection.doOutput = true
-          connection.setRequestProperty("Authorization", "Bearer $deviceToken")
-          connection.setRequestProperty("Content-Type", "application/json")
-          connection.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
-          statusCode = connection.responseCode
-          val stream = if (statusCode in 200..299) connection.inputStream else connection.errorStream
-          response = stream?.bufferedReader(StandardCharsets.UTF_8)?.use { it.readText() } ?: "{}"
-          if (statusCode != 503 || attempt == 2) break
-          connection.disconnect()
-          connection = null
+          try {
+            connection = URL(base.toString().trimEnd('/') + "/v1/collector/eligibility").openConnection() as HttpURLConnection
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.doOutput = true
+            connection.setRequestProperty("Authorization", "Bearer $deviceToken")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
+            statusCode = connection.responseCode
+            val stream = if (statusCode in 200..299) connection.inputStream else connection.errorStream
+            response = stream?.bufferedReader(StandardCharsets.UTF_8)?.use { it.readText() } ?: "{}"
+            if (statusCode != 503 || attempt == 2) break
+          } catch (error: Exception) {
+            if (attempt == 2) throw error
+          } finally {
+            if (statusCode == 503 || attempt < 2) {
+              connection?.disconnect()
+              connection = null
+            }
+          }
           Thread.sleep((1000L shl attempt) + Random.nextLong(0, 251))
         }
         val backendEligible = statusCode == 200 && JSONObject(response).optBoolean("eligible", false)
