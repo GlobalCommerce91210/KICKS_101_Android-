@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Pool, PoolClient } from 'pg';
+import type { Pool } from 'pg';
 
 export type ConsentAction = 'grant' | 'deny' | 'revoke';
 export type ConsentDecision = {
@@ -46,10 +46,10 @@ export class PostgresConsentRepository implements ConsentRepository {
       const id = randomUUID();
       const result = await client.query<{ occurred_at: Date | string }>(
         `INSERT INTO consent_events
-          (id, subject_id, permission_id, action, policy_version, purpose_version, correlation_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+          (id, subject_id, permission_id, action, policy_version, purpose_version, purpose, correlation_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING occurred_at`,
-        [id, input.subjectId, input.permissionId, input.action, input.policyVersion, input.purposeVersion, id]
+        [id, input.subjectId, input.permissionId, input.action, input.policyVersion, input.purposeVersion, input.purpose, id]
       );
       await client.query('COMMIT');
       return { ...input, id, occurredAt: new Date(result.rows[0].occurred_at).toISOString() };
@@ -64,9 +64,9 @@ export class PostgresConsentRepository implements ConsentRepository {
   async getCurrent(permissionId: string): Promise<CurrentConsent | null> {
     const result = await this.pool.query<{
       id: string; subject_id: string; action: ConsentAction; policy_version: string;
-      purpose_version: string; occurred_at: Date | string;
+      purpose_version: string; purpose: string; occurred_at: Date | string;
     }>(
-      'SELECT id, subject_id, action, policy_version, purpose_version, occurred_at FROM consent_events WHERE permission_id = $1 ORDER BY occurred_at DESC, id DESC LIMIT 1',
+      'SELECT id, subject_id, action, policy_version, purpose_version, purpose, occurred_at FROM consent_events WHERE permission_id = $1 ORDER BY occurred_at DESC, id DESC LIMIT 1',
       [permissionId]
     );
     const row = result.rows[0];
@@ -74,7 +74,7 @@ export class PostgresConsentRepository implements ConsentRepository {
     // The schema does not yet persist purpose. Until it does, protected ingestion must
     // fail closed for PostgreSQL-backed consent rather than guess the purpose.
     return {
-      id: permissionId, subjectId: row.subject_id, purpose: '',
+      id: permissionId, subjectId: row.subject_id, purpose: row.purpose,
       policyVersion: row.policy_version, purposeVersion: row.purpose_version,
       state: row.action === 'grant' ? 'granted' : 'revoked'
     };
@@ -85,13 +85,13 @@ export class PostgresConsentRepository implements ConsentRepository {
       id: string; subject_id: string; action: ConsentAction; policy_version: string;
       purpose_version: string; occurred_at: Date | string;
     }>(
-      'SELECT id, subject_id, action, policy_version, purpose_version, occurred_at FROM consent_events WHERE permission_id = $1 AND subject_id = $2 ORDER BY occurred_at ASC, id ASC',
+      'SELECT id, subject_id, action, policy_version, purpose_version, purpose, occurred_at FROM consent_events WHERE permission_id = $1 AND subject_id = $2 ORDER BY occurred_at ASC, id ASC',
       [permissionId, subjectId]
     );
     return result.rows.map(row => ({
       id: row.id, permissionId, subjectId: row.subject_id, action: row.action,
       policyVersion: row.policy_version, purposeVersion: row.purpose_version,
-      purpose: '', occurredAt: new Date(row.occurred_at).toISOString()
+      purpose: row.purpose, occurredAt: new Date(row.occurred_at).toISOString()
     }));
   }
 }
