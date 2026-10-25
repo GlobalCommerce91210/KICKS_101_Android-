@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { buildServer } from './server.js';
 import { PostgresConsentRepository } from './consent-repository.js';
+import { PostgresDeviceRepository } from './device-repository.js';
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -8,7 +9,7 @@ if (!connectionString) {
 }
 
 const pool = new Pool({ connectionString });
-const app = buildServer({ consentRepository: new PostgresConsentRepository(pool) });
+const app = buildServer({ consentRepository: new PostgresConsentRepository(pool), deviceRepository: new PostgresDeviceRepository(pool) });
 app.addHook('onClose', async () => { await pool.end(); });
 
 try {
