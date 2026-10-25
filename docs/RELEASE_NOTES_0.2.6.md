@@ -25,3 +25,6 @@ Automated tests, migration application, Android build, API restart recovery, and
 ## Remaining integration gaps before calling consent end-to-end
 
 The existing Permissions screen still uses the legacy permissions endpoints and demo user ID. It is not yet fully wired to the new durable consent ledger because the app-side authenticated device enrollment/session flow must first supply a securely stored device token and real UUID-backed permission identity. Do not treat a change in the legacy Permissions screen as proof that the PostgreSQL consent event was persisted.
+
+- Added PostgreSQL metadata-batch persistence with device-active checks, purpose-specific consent revalidation under the same permission lock as grant/revoke writes, and duplicate batch rejection.
+- Added database-backed test cases for persisted metadata, replay rejection, and revocation blocking ingestion; these are authored but not yet executed.
