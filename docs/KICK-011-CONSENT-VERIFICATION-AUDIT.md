@@ -46,3 +46,16 @@ Status: **OPEN — P0 RELEASE BLOCKER.** This document records the repository in
 ## KICK-012 handoff
 
 KICK-012 should consume the authoritative `CollectorAuthorization` contract, not reimplement consent logic. It must fail closed when authorization is missing, expired, revoked, stale, or unverifiable; check before capture and before each protected upload; stop on revocation/unavailable refresh; and never drain offline buffers under stale authorization. Require contract tests against the same API enforcement path.
+
+## Follow-up implementation checkpoint
+
+A new module, `services/api/src/durableConsent.ts`, has been added on the KICK-011 branch. It defines a PostgreSQL-backed decision transaction boundary, receipt commitment generation, idempotency fingerprint checking, durable stamping-job submission semantics, and an independent-verifier interface. Provider absence is represented as `PENDING_PROVIDER`; provider submission alone does not set `VERIFIED`.
+
+**This module is a foundation, not an active production gate.** It is not yet wired into `buildServer()`, authentication/session identity is not yet bridged from the existing in-memory device enrollment, and existing `/v1/consent-events` and `/v1/metadata-batches` handlers have not yet been replaced by the durable service. The migration and service have not been applied or integration-tested against PostgreSQL. Do not deploy or enable collection based on this checkpoint.
+
+Next integration work must:
+- use a configured database pool and durable device enrollment before exposing these handlers;
+- bind actor and user identity only from trusted authentication context;
+- make the legacy metadata upload path deny by default until it uses the same authorization service;
+- test transaction races and SQL behavior against PostgreSQL;
+- add a real, independently operated chain verifier before any production status can be VERIFIED.
