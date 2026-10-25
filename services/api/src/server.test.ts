@@ -1,5 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import{buildServer,memoryStore}from'./server.js';import{randomUUID}from'node:crypto';
-const setup=async()=>{const store=memoryStore(),app=buildServer({store,adminSecret:'staging-secret'}),subjectId=randomUUID();const r=await app.inject({method:'POST',url:'/v1/staging/devices',headers:{'x-admin-secret':'staging-secret'},payload:{subjectId}});return{app,store,token:r.json().token as string}};
+import{simulatedAuth}from'./test-support.js';
+const setup=async()=>{const store=memoryStore(),app=buildServer({store,adminSecret:'staging-secret',collectorAuthorization:simulatedAuth()}),subjectId=randomUUID();const r=await app.inject({method:'POST',url:'/v1/staging/devices',headers:{'x-admin-secret':'staging-secret'},payload:{subjectId}});return{app,store,token:r.json().token as string}};
 test('health reports metadata-only staging',async()=>{const app=buildServer(),r=await app.inject({method:'GET',url:'/health'});assert.equal(r.json().collector,'metadata-only');await app.close()});
 test('serves web app index.html on root path',async()=>{const app=buildServer(),r=await app.inject({method:'GET',url:'/'});assert.equal(r.statusCode,200);assert.match(r.headers['content-type']??'',/text\/html/);await app.close()});
 test('zero trust denies unauthenticated consent writes',async()=>{const app=buildServer(),r=await app.inject({method:'POST',url:'/v1/consent-events',payload:{}});assert.equal(r.statusCode,401);await app.close()});
@@ -8,7 +9,7 @@ test('revocation immediately blocks ingestion and preserves decision history',as
 test('payload fields fail the minimization contract',async()=>{const{app,token}=await setup();const r=await app.inject({method:'POST',url:'/v1/metadata-batches',headers:{authorization:`Bearer ${token}`},payload:{batchId:randomUUID(),schemaVersion:'2026-08-01',observations:[{payload:'secret'}]}});assert.equal(r.statusCode,400);await app.close()});
 
 test('intelligence and value engine endpoints satisfy openapi contract', async () => {
-  const app = buildServer();
+  const app = buildServer({ allowSyntheticDevelopmentEvents: true });
 
   // 1. POST /v1/intelligence/events
   const eventId = 'test-evt-99';

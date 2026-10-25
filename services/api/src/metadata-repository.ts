@@ -19,13 +19,13 @@ export type MetadataBatch = {
   observations: MetadataObservation[];
 };
 export interface MetadataRepository {
-  ingestBatch(device: DeviceRecord, batch: MetadataBatch): Promise<{ batchId: string; accepted: number }>;
+  ingestBatch(device: DeviceRecord, batch: MetadataBatch, authorize?: (transaction: unknown) => Promise<void>): Promise<{ batchId: string; accepted: number }>;
 }
 
 export class PostgresMetadataRepository implements MetadataRepository {
   constructor(private readonly pool: Pool) {}
 
-  async ingestBatch(device: DeviceRecord, batch: MetadataBatch): Promise<{ batchId: string; accepted: number }> {
+  async ingestBatch(device: DeviceRecord, batch: MetadataBatch, authorize?: (transaction: unknown) => Promise<void>): Promise<{ batchId: string; accepted: number }> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -61,6 +61,9 @@ export class PostgresMetadataRepository implements MetadataRepository {
           throw error;
         }
       }
+
+      // Re-validate collector authorization inside the same transaction, after the permission locks, so a concurrent revocation cannot commit data.
+      if (authorize) await authorize(client);
 
       await client.query(
         'INSERT INTO metadata_batches (id, device_id, schema_version, observation_count) VALUES ($1, $2, $3, $4)',

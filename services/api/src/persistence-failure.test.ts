@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { buildServer } from './server.js';
 import type { ConsentRepository } from './consent-repository.js';
+import { simulatedAuth } from './test-support.js';
 import type { DeviceRepository } from './device-repository.js';
 
 const subjectId = randomUUID();
@@ -151,7 +152,8 @@ test('collector eligibility requires explicit activation and exact current purpo
   const app = buildServer({
     adminSecret: 'failure-test-secret',
     deviceRepository: deviceRepository(),
-    consentRepository: consentRepository()
+    consentRepository: consentRepository(),
+    collectorAuthorization: simulatedAuth()
   });
   try {
     const headers = await enroll(app);

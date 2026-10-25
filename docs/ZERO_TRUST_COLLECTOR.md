@@ -30,3 +30,35 @@ Before enabling collection, the implementation must:
 - never label demo observations as live network traffic.
 
 The merged Android manifest should contain only permissions justified by active features. The 0.2.6 manifest removes broad external-storage read/write permissions and the system-overlay permission because the collector/UI does not need them. Re-add a permission only with a documented feature requirement and reviewed user-facing disclosure.
+
+
+## KICK-011C — Verified collector authorization
+
+`CollectorAuthorizationService` (`services/api/src/collector-authorization.ts`) is the single authoritative, fail-closed boundary for protected collection and ingestion. It is **deny-by-default**: with no `CollectorEvidenceProvider` configured every request is denied (`BLOCKED_SERVICE_UNAVAILABLE`).
+
+### Mandatory checks (all must pass)
+Valid subject → device owned by subject → active device enrollment → latest consent is GRANT → exact scope and purpose → current policy and disclosure versions → receipt linked to the current decision version → independently verified blockchain proof → required chain and finality → server-verified OS permission evidence → collector safety policy → not revoked, expired or superseded. Missing data, exceptions, timeouts, stale records and unknown statuses deny. Client-provided "verified" flags are never evidence (strict schemas reject them).
+
+### Lifecycle
+- Capabilities are short-lived (default 60 s), opaque, and bound to subject, device, scope, purpose, operation, decision version and revocation epoch.
+- TTL never replaces revocation: every protected operation re-reads evidence (`validateAuthorization`, `runAuthorized`, `assertAuthorized`).
+- `runAuthorized` runs the protected write inside the provider's ingestion transaction. `PostgresMetadataRepository.ingestBatch` re-validates inside the batch transaction after the permission advisory locks and before any insert, so concurrent revocation cannot commit data. In-memory ingestion re-checks synchronously immediately before commit.
+- Any consent decision, consent revocation or device revocation immediately drops issued capabilities for the subject/device and invokes `onCollectorStop`. Blockchain revocation stamping is not awaited.
+- A new grant needs its own independently verified receipt.
+
+### Protected endpoint inventory
+| Path | Protection |
+|---|---|
+| `POST /v1/metadata-batches` | device auth, strict schema, per-scope authorization, in-transaction recheck, whole-batch rejection, replay/idempotency kept, sanitized denial audit |
+| `POST /v1/intelligence/events` | real events require device credentials plus `x-kicks-consent-id` + `x-kicks-consent-purpose` headers, `device_id` matching the credential, and authorization. Unauthenticated synthetic fixtures are accepted only when `allowSyntheticDevelopmentEvents` is set **and** `NODE_ENV!=='production'`; they are marked `x-kicks-event-origin: synthetic` and a request carrying credentials is never treated as synthetic |
+| `POST /v1/collector/eligibility` | sanitized eligibility state; informational only for Android |
+| Queues, offline sync, partner export | no such server paths exist yet; the `queue.process` and `partner.export` operations must call `runAuthorized` when added |
+
+### Eligibility states
+`BLOCKED_NO_CONSENT`, `BLOCKED_STAMP_PENDING`, `BLOCKED_VERIFICATION_FAILED`, `BLOCKED_DEVICE_NOT_ENROLLED`, `BLOCKED_OS_PERMISSION`, `BLOCKED_REVOKED`, `BLOCKED_POLICY`, `BLOCKED_SERVICE_UNAVAILABLE`, `ELIGIBLE`. Denials return `{eligible:false,state,error}` (403, or 503 + `retry-after` when evidence is transiently unavailable). The Android client treats this as informational; the backend stays authoritative.
+
+### Blocking dependencies (KICK-011A/B)
+The repository has persistent consent decisions/revocation and device tokens, but **no** immutable consent receipts, decision-version linkage, blockchain proof records, verifier, device enrollment state, OS-permission attestation, safety policy store or revocation epoch. No production `CollectorEvidenceProvider` exists, so production authorization is denied everywhere until those are implemented. Simulated evidence lives only in `src/test-support.ts`.
+
+### Migration / rollback
+No schema migration is included. A future provider needs tables for receipts, proofs and revocation epochs. Rollback = revert this change; the previous behaviour (consent-only checks) was less strict, so rollback is not recommended.

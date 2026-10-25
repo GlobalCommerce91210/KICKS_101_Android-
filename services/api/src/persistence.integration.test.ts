@@ -6,6 +6,7 @@ import { Pool } from 'pg';
 import { buildServer } from './server.js';
 import { PostgresConsentRepository } from './consent-repository.js';
 import { PostgresDeviceRepository } from './device-repository.js';
+import { simulatedAuth } from './test-support.js';
 import { PostgresMetadataRepository } from './metadata-repository.js';
 
 const databaseUrl = process.env.KICKS_TEST_DATABASE_URL;
@@ -36,7 +37,7 @@ test('PostgreSQL device identity and consent history survive an API restart', { 
     const subjectId = randomUUID();
     const permissionId = randomUUID();
     const requestId = randomUUID();
-    const firstApp = buildServer({ ...repositories(), adminSecret });
+    const firstApp = buildServer({ ...repositories(), adminSecret, collectorAuthorization: simulatedAuth() });
 
     const enrollment = await firstApp.inject({
       method: 'POST',
@@ -70,7 +71,7 @@ test('PostgreSQL device identity and consent history survive an API restart', { 
 
     // Recreate the API and repository objects while keeping only PostgreSQL
     // alive, modelling a process restart rather than reusing in-memory state.
-    app = buildServer({ ...repositories(), adminSecret });
+    app = buildServer({ ...repositories(), adminSecret, collectorAuthorization: simulatedAuth() });
     const history = await app.inject({
       method: 'GET',
       url: `/v1/consent-events/${permissionId}`,

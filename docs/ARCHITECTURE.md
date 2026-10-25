@@ -27,3 +27,6 @@ Development, staging, and production use separate credentials, databases, identi
 ## Launch evidence
 
 A release is blocked until the lifecycle succeeds end to end: real MFA, KYC, consent grant, one opportunity, versioned agreement, minimized data result, immutable reward entry, sandbox payout, revocation enforcement, audit export, backup restore, and negative authorization tests.
+
+## Collector authorization (KICK-011C)
+All protected collector ingestion passes through `CollectorAuthorizationService`, which requires a current consent grant, independently verified blockchain receipt, active enrolled device, OS permission evidence and safety policy, and fails closed. See `docs/ZERO_TRUST_COLLECTOR.md` for the check list, endpoint inventory, eligibility API contract and blocking KICK-011A/B dependencies.
