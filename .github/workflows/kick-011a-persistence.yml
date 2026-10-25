@@ -1,20 +1,7 @@
 name: KICK-011A Persistence Gates
 
 on:
-  pull_request:
-    paths:
-      - "services/api/**"
-      - "apps/mobile/**"
-      - "docs/ZERO_TRUST_COLLECTOR.md"
-      - ".github/workflows/kick-011a-persistence.yml"
-      - "package.json"
-  push:
-    branches:
-      - "codex/kick-011a-secure-consent-decisions"
-    paths:
-      - "services/api/**"
-      - ".github/workflows/kick-011a-persistence.yml"
-      - "package.json"
+  workflow_dispatch:
 
 permissions:
   contents: read
