@@ -92,8 +92,8 @@ android {
         applicationId 'com.datastorm.kicks'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "0.2.5"
+        versionCode 9
+        versionName "0.2.6"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
         buildConfigField "boolean", "COLLECTOR_ENABLED", "${findProperty('kicks.collectorEnabled') ?: 'false'}"
