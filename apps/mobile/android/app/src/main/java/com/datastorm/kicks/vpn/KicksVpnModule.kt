@@ -16,7 +16,9 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.datastorm.kicks.BuildConfig
 
-class KicksVpnModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {\n  private val verificationExecutor = Executors.newSingleThreadExecutor()\n  @Volatile private var backendEligibilityVerified = false
+class KicksVpnModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
+  private val verificationExecutor = Executors.newSingleThreadExecutor()
+  @Volatile private var backendEligibilityVerified = false
   override fun getName() = "KicksVpn"
 
   @ReactMethod
@@ -65,7 +67,8 @@ class KicksVpnModule(private val context: ReactApplicationContext) : ReactContex
         val vpnAuthorized = VpnService.prepare(context) == null
         val notificationsGranted = Build.VERSION.SDK_INT < 33 ||
           context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-        val eligible = backendEligible && vpnAuthorized && notificationsGranted && BuildConfig.COLLECTOR_ENABLED\n        backendEligibilityVerified = eligible
+        val eligible = backendEligible && vpnAuthorized && notificationsGranted && BuildConfig.COLLECTOR_ENABLED
+        backendEligibilityVerified = eligible
         val reason = when {
           !backendEligible -> "backend_consent_or_device_verification_failed"
           !vpnAuthorized -> "vpn_authorization_required"
@@ -133,7 +136,11 @@ class KicksVpnModule(private val context: ReactApplicationContext) : ReactContex
       promise.reject("VPN_AUTH_REQUIRED", "Android VPN authorization is required.")
       return
     }
-    if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {\n      promise.reject("NOTIFICATION_PERMISSION_REQUIRED", "Notification permission is required so monitoring cannot run invisibly.")\n      return\n    }\n    if (!BuildConfig.COLLECTOR_ENABLED) {
+    if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+      promise.reject("NOTIFICATION_PERMISSION_REQUIRED", "Notification permission is required so monitoring cannot run invisibly.")
+      return
+    }
+    if (!BuildConfig.COLLECTOR_ENABLED) {
       promise.reject("COLLECTOR_NOT_CONFIGURED", "The beta collector is disabled until a production endpoint and forwarding path are configured.")
       return
     }
