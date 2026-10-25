@@ -144,3 +144,42 @@ test('consent verification outage fails closed for metadata ingestion', async ()
     await app.close();
   }
 });
+
+
+test('collector eligibility requires explicit activation and exact current purpose consent', async () => {
+  const app = buildServer({
+    adminSecret: 'failure-test-secret',
+    deviceRepository: deviceRepository(),
+    consentRepository: consentRepository()
+  });
+  try {
+    const headers = await enroll(app);
+    const missingActivation = await app.inject({
+      method: 'POST',
+      url: '/v1/collector/eligibility',
+      headers,
+      payload: { permissionId, purpose: consentInput.purpose, activationRequested: false }
+    });
+    assert.equal(missingActivation.statusCode, 400);
+
+    const wrongPurpose = await app.inject({
+      method: 'POST',
+      url: '/v1/collector/eligibility',
+      headers,
+      payload: { permissionId, purpose: 'A different purpose', activationRequested: true }
+    });
+    assert.equal(wrongPurpose.statusCode, 403);
+
+    const allowed = await app.inject({
+      method: 'POST',
+      url: '/v1/collector/eligibility',
+      headers,
+      payload: { permissionId, purpose: consentInput.purpose, activationRequested: true }
+    });
+    assert.equal(allowed.statusCode, 200);
+    assert.equal(allowed.json().eligible, true);
+    assert.equal(allowed.json().monitoringDefaultOn, false);
+  } finally {
+    await app.close();
+  }
+});
