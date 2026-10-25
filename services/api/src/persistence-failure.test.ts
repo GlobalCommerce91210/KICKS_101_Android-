@@ -17,7 +17,8 @@ const consentInput = {
 };
 const deviceRepository = (overrides: Partial<DeviceRepository> = {}): DeviceRepository => ({
   create: async () => undefined,
-  revokeByTokenHash: async () => true,\n  findActiveByTokenHash: async tokenHash => ({
+  revokeByTokenHash: async () => true,
+  findActiveByTokenHash: async tokenHash => ({
     id: randomUUID(), subjectId, tokenHash, revoked: false
   }),
   ...overrides
