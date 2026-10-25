@@ -80,8 +80,10 @@ export class PostgresConsentRepository implements ConsentRepository {
          RETURNING occurred_at`,
         [id, input.requestId, input.subjectId, input.permissionId, input.action, input.policyVersion, input.purposeVersion, input.purpose, id]
       );
+      const saved = result.rows[0];
+      if (!saved) throw new Error('consent_event_insert_returned_no_row');
       await client.query('COMMIT');
-      return { ...input, id, occurredAt: new Date(result.rows[0].occurred_at).toISOString() };
+      return { ...input, id, occurredAt: new Date(saved.occurred_at).toISOString() };
     } catch (error) {
       await client.query('ROLLBACK').catch(() => undefined);
       throw error;
@@ -110,14 +112,14 @@ export class PostgresConsentRepository implements ConsentRepository {
 
   async getHistory(permissionId: string, subjectId: string): Promise<ConsentEvent[]> {
     const result = await this.pool.query<{
-      id: string; subject_id: string; action: ConsentAction; policy_version: string;
+      id: string; request_id: string; subject_id: string; action: ConsentAction; policy_version: string;
       purpose_version: string; purpose: string; occurred_at: Date | string;
     }>(
-      'SELECT id, subject_id, action, policy_version, purpose_version, purpose, occurred_at FROM consent_events WHERE permission_id = $1 AND subject_id = $2 ORDER BY event_sequence ASC',
+      'SELECT id, request_id, subject_id, action, policy_version, purpose_version, purpose, occurred_at FROM consent_events WHERE permission_id = $1 AND subject_id = $2 ORDER BY event_sequence ASC',
       [permissionId, subjectId]
     );
     return result.rows.map(row => ({
-      id: row.id, permissionId, subjectId: row.subject_id, action: row.action,
+      id: row.id, permissionId, requestId: row.request_id, subjectId: row.subject_id, action: row.action,
       policyVersion: row.policy_version, purposeVersion: row.purpose_version,
       purpose: row.purpose, occurredAt: new Date(row.occurred_at).toISOString()
     }));
