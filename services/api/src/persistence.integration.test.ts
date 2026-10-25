@@ -150,3 +150,45 @@ test('PostgreSQL device identity and consent history survive an API restart', { 
     await adminPool.end();
   }
 });
+
+
+test('consent migration preserves legacy rows and assigns non-authorizing purpose', { skip: !databaseUrl }, async () => {
+  const adminPool = new Pool({ connectionString: databaseUrl });
+  const schema = `kicks_migration_test_${randomUUID().replaceAll('-', '')}`;
+  let pool: Pool | undefined;
+  try {
+    await adminPool.query(`CREATE SCHEMA "${schema}"`);
+    pool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` });
+    await pool.query(`
+      CREATE TABLE consent_events (
+        id uuid PRIMARY KEY,
+        subject_id uuid NOT NULL,
+        permission_id uuid NOT NULL,
+        action text NOT NULL CHECK (action IN ('grant','deny','revoke')),
+        policy_version text NOT NULL,
+        purpose_version text NOT NULL,
+        occurred_at timestamptz NOT NULL DEFAULT now(),
+        correlation_id uuid NOT NULL
+      )
+    `);
+    const id = randomUUID();
+    await pool.query(
+      'INSERT INTO consent_events (id, subject_id, permission_id, action, policy_version, purpose_version, correlation_id) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [id, randomUUID(), randomUUID(), 'grant', 'legacy-policy', 'legacy-purpose', randomUUID()]
+    );
+    const migration = await readFile(new URL('../db/migrations/20261025_consent_purpose.sql', import.meta.url), 'utf8');
+    await pool.query(migration);
+    const result = await pool.query(
+      'SELECT id, purpose, request_id, event_sequence FROM consent_events WHERE id = $1',
+      [id]
+    );
+    assert.equal(result.rows.length, 1);
+    assert.equal(result.rows[0].purpose, 'legacy-unavailable');
+    assert.equal(result.rows[0].request_id, id);
+    assert.ok(Number(result.rows[0].event_sequence) > 0);
+  } finally {
+    await pool?.end().catch(() => undefined);
+    await adminPool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);
+    await adminPool.end();
+  }
+});
