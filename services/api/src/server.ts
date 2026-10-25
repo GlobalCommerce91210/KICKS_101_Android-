@@ -23,7 +23,7 @@ export * from './wallet.js';
 export * from './permissions.js';
 export * from './branding.js';
 import { KICKS_BRAND_MANIFEST } from './branding.js';
-import type { ConsentRepository } from './consent-repository.js';
+import type { ConsentEvent, ConsentRepository } from './consent-repository.js';
 
 type Device={id:string;subjectId:string;tokenHash:string;revoked:boolean};type Consent={id:string;subjectId:string;purpose:string;policyVersion:string;purposeVersion:string;state:'granted'|'revoked'};
 const observation=z.object({eventId:z.string().uuid(),occurredAt:z.string().datetime(),sourceApp:z.string().min(1).max(180).nullable(),attribution:z.enum(['verified','best_effort','unknown']),destinationHost:z.string().regex(/^(?=.{1,253}$)(?!-)[a-z0-9.-]+(?<!-)$/),protocol:z.enum(['dns','tcp','udp','tls','quic','other']),bytesBucket:z.enum(['0-1KB','1-10KB','10-100KB','100KB-1MB','1MB+']),classification:z.enum(['expected','review','unpermissioned','unknown']),consentId:z.string().uuid(),consentPurpose:z.string().min(3).max(120)}).strict();
