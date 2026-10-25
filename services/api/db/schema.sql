@@ -1,7 +1,7 @@
 CREATE TABLE consent_events (
   id uuid PRIMARY KEY, subject_id uuid NOT NULL, permission_id uuid NOT NULL,
   action text NOT NULL CHECK (action IN ('grant','deny','revoke')),
-  policy_version text NOT NULL, purpose_version text NOT NULL,
+  policy_version text NOT NULL, purpose_version text NOT NULL, purpose text NOT NULL,
   occurred_at timestamptz NOT NULL DEFAULT now(), correlation_id uuid NOT NULL
 );
 REVOKE UPDATE, DELETE ON consent_events FROM PUBLIC;
