@@ -46,22 +46,23 @@ test('PostgreSQL device identity and consent history survive an API restart', { 
     const { token, deviceId } = enrollment.json() as { token: string; deviceId: string };
     const headers = { authorization: `Bearer ${token}` };
 
-    const grant = await firstApp.inject({
-      method: 'POST',
-      url: '/v1/consent-events',
-      headers,
-      payload: {
-        permissionId,
-        requestId,
-        expectedEventSequence: 0,
-        action: 'grant',
-        policyVersion: 'privacy-test-1',
-        purposeVersion: 'network-safety-test-1',
-        purpose: 'Detect unexpected data destinations'
-      }
-    });
+    const grantPayload = {
+      permissionId,
+      requestId,
+      expectedEventSequence: 0,
+      action: 'grant' as const,
+      policyVersion: 'privacy-test-1',
+      purposeVersion: 'network-safety-test-1',
+      purpose: 'Detect unexpected data destinations'
+    };
+    const [grant, simultaneousRetry] = await Promise.all([
+      firstApp.inject({ method: 'POST', url: '/v1/consent-events', headers, payload: grantPayload }),
+      firstApp.inject({ method: 'POST', url: '/v1/consent-events', headers, payload: grantPayload })
+    ]);
     assert.equal(grant.statusCode, 202);
+    assert.equal(simultaneousRetry.statusCode, 202);
     const originalEventId = grant.json().id as string;
+    assert.equal(simultaneousRetry.json().id, originalEventId);
     await firstApp.close();
     app = undefined;
 
