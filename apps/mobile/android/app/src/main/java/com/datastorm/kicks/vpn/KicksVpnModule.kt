@@ -23,6 +23,7 @@ class KicksVpnModule(private val context: ReactApplicationContext) : ReactContex
 
   @ReactMethod
   fun verifyBackendEligibility(apiBaseUrl: String, deviceToken: String, permissionId: String, purpose: String, activationRequested: Boolean, promise: Promise) {
+    backendEligibilityVerified = false
     if (apiBaseUrl.isBlank() || deviceToken.isBlank() || permissionId.isBlank() || purpose.isBlank() || !activationRequested) {
       promise.resolve(com.facebook.react.bridge.Arguments.createMap().apply {
         putBoolean("eligible", false)
@@ -85,6 +86,7 @@ class KicksVpnModule(private val context: ReactApplicationContext) : ReactContex
           putString("reason", reason)
         })
       } catch (_: Exception) {
+        backendEligibilityVerified = false
         promise.resolve(com.facebook.react.bridge.Arguments.createMap().apply {
           putBoolean("eligible", false)
           putString("reason", "backend_verification_unavailable")
