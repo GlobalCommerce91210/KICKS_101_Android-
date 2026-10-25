@@ -6,6 +6,7 @@ import { Pool } from 'pg';
 import { buildServer } from './server.js';
 import { PostgresConsentRepository } from './consent-repository.js';
 import { PostgresDeviceRepository } from './device-repository.js';
+import { PostgresMetadataRepository } from './metadata-repository.js';
 
 const databaseUrl = process.env.KICKS_TEST_DATABASE_URL;
 
@@ -28,7 +29,8 @@ test('PostgreSQL device identity and consent history survive an API restart', { 
 
     const repositories = () => ({
       consentRepository: new PostgresConsentRepository(pool!),
-      deviceRepository: new PostgresDeviceRepository(pool!)
+      deviceRepository: new PostgresDeviceRepository(pool!),
+      metadataRepository: new PostgresMetadataRepository(pool!)
     });
     const adminSecret = 'test-only-secret';
     const subjectId = randomUUID();
@@ -148,6 +150,35 @@ test('PostgreSQL device identity and consent history survive an API restart', { 
     });
     assert.equal(staleDecision.statusCode, 409);
     assert.equal(staleDecision.json().error, 'stale_consent_decision');
+
+    const acceptedBatchId = randomUUID();
+    const acceptedEventId = randomUUID();
+    const acceptedBatch = await app.inject({
+      method: 'POST',
+      url: '/v1/metadata-batches',
+      headers,
+      payload: {
+        batchId: acceptedBatchId,
+        schemaVersion: '2026-08-01',
+        observations: [{
+          eventId: acceptedEventId,
+          occurredAt: new Date().toISOString(),
+          sourceApp: 'com.example.test',
+          attribution: 'verified',
+          destinationHost: 'api.example.com',
+          protocol: 'tls',
+          bytesBucket: '1-10KB',
+          classification: 'expected',
+          consentId: permissionId,
+          consentPurpose: 'Detect unexpected data destinations'
+        }]
+      }
+    });
+    assert.equal(acceptedBatch.statusCode, 202);
+    const persistedBatch = await pool!.query('SELECT observation_count FROM metadata_batches WHERE id = $1', [acceptedBatchId]);
+    assert.equal(persistedBatch.rows[0]?.observation_count, 1);
+    const persistedObservation = await pool!.query('SELECT id FROM metadata_observations WHERE id = $1', [acceptedEventId]);
+    assert.equal(persistedObservation.rows.length, 1);
 
     const revoke = await app.inject({
       method: 'POST',
