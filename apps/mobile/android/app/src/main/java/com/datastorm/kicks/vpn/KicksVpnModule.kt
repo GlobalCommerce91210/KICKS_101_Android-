@@ -151,6 +151,10 @@ class KicksVpnModule(private val context: ReactApplicationContext) : ReactContex
 
   @ReactMethod
   fun start(promise: Promise) {
+    if (!backendEligibilityVerified) {
+      promise.reject("ELIGIBILITY_NOT_VERIFIED", "Backend device identity and purpose-specific consent must be verified before collector activation.")
+      return
+    }
     if (VpnService.prepare(context) != null) {
       promise.reject("VPN_AUTH_REQUIRED", "Android VPN authorization is required.")
       return
@@ -169,6 +173,7 @@ class KicksVpnModule(private val context: ReactApplicationContext) : ReactContex
 
   @ReactMethod
   fun stop(promise: Promise) {
+    backendEligibilityVerified = false
     context.startService(Intent(context, KicksVpnService::class.java).setAction(KicksVpnService.ACTION_STOP))
     promise.resolve("stopping")
   }
