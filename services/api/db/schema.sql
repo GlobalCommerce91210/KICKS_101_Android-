@@ -1,5 +1,5 @@
 CREATE TABLE consent_events (
-  id uuid PRIMARY KEY, subject_id uuid NOT NULL, permission_id uuid NOT NULL,
+  id uuid PRIMARY KEY, event_sequence bigserial UNIQUE NOT NULL, subject_id uuid NOT NULL, permission_id uuid NOT NULL,
   action text NOT NULL CHECK (action IN ('grant','deny','revoke')),
   policy_version text NOT NULL, purpose_version text NOT NULL, purpose text NOT NULL,
   occurred_at timestamptz NOT NULL DEFAULT now(), correlation_id uuid NOT NULL
