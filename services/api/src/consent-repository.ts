@@ -83,7 +83,7 @@ export class PostgresConsentRepository implements ConsentRepository {
   async getHistory(permissionId: string, subjectId: string): Promise<ConsentEvent[]> {
     const result = await this.pool.query<{
       id: string; subject_id: string; action: ConsentAction; policy_version: string;
-      purpose_version: string; occurred_at: Date | string;
+      purpose_version: string; purpose: string; occurred_at: Date | string;
     }>(
       'SELECT id, subject_id, action, policy_version, purpose_version, purpose, occurred_at FROM consent_events WHERE permission_id = $1 AND subject_id = $2 ORDER BY occurred_at ASC, id ASC',
       [permissionId, subjectId]
