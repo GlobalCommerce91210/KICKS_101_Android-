@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createReadStream, existsSync, statSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { extname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import {
@@ -27,11 +28,15 @@ import { KICKS_BRAND_MANIFEST } from './branding.js';
 import type { ConsentEvent, ConsentRepository } from './consent-repository.js';
 import type { DeviceRepository } from './device-repository.js';
 import type { MetadataRepository } from './metadata-repository.js';
+import { OidcVerificationError } from './oidc.js';
+import type { DeviceIdentityVerifier } from './oidc.js';
 
 type Device={id:string;subjectId:string;tokenHash:string;revoked:boolean};type Consent={id:string;subjectId:string;purpose:string;policyVersion:string;purposeVersion:string;state:'granted'|'revoked'};
 const observation=z.object({eventId:z.string().uuid(),occurredAt:z.string().datetime(),sourceApp:z.string().min(1).max(180).nullable(),attribution:z.enum(['verified','best_effort','unknown']),destinationHost:z.string().regex(/^(?=.{1,253}$)(?!-)[a-z0-9.-]+(?<!-)$/),protocol:z.enum(['dns','tcp','udp','tls','quic','other']),bytesBucket:z.enum(['0-1KB','1-10KB','10-100KB','100KB-1MB','1MB+']),classification:z.enum(['expected','review','unpermissioned','unknown']),consentId:z.string().uuid(),consentPurpose:z.string().min(3).max(120),consentPolicyVersion:z.string().min(1).max(64),consentPurposeVersion:z.string().min(1).max(64)}).strict();
 type Observation=z.infer<typeof observation>;export interface Store{devices:Map<string,Device>;consents:Map<string,Consent>;consentHistory:ConsentEvent[];consentRequests:Map<string,ConsentEvent>;batches:Set<string>;observations:Observation[]};export const memoryStore=():Store=>({devices:new Map(),consents:new Map(),consentHistory:[],consentRequests:new Map(),batches:new Set(),observations:[]});
 const hash=(v:string)=>createHash('sha256').update(v).digest('hex');const equal=(a:string,b:string)=>{const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length&&timingSafeEqual(x,y)};
+const oidcSubjectId=(issuer:string,subject:string)=>{const bytes=createHash('sha256').update('kicks-oidc-subject\0').update(issuer).update('\0').update(subject).digest().subarray(0,16);bytes[6]=(bytes[6]!&0x0f)|0x80;bytes[8]=(bytes[8]!&0x3f)|0x80;const hex=bytes.toString('hex');return`${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`};
+export function trustedProxyAllowlistFromEnv(value:string|undefined):string[]{if(!value?.trim())return[];const proxies=value.split(',').map(item=>item.trim());for(const proxy of proxies){const[host,prefix,...extra]=proxy.split('/');if(extra.length||!host||!isIP(host)||(prefix!==undefined&&(!/^\d+$/.test(prefix)||Number(prefix)<0||Number(prefix)>(isIP(host)===4?32:128))))throw new Error('API_TRUSTED_PROXIES must contain only valid IP addresses or CIDRs');}return proxies}
 const decision=z.object({permissionId:z.string().uuid(),requestId:z.string().uuid(),expectedEventSequence:z.number().int().nonnegative().optional(),action:z.enum(['grant','deny','revoke']),policyVersion:z.string().min(1).max(64),purposeVersion:z.string().min(1).max(64),purpose:z.string().min(3).max(120)}).strict();
 const batch=z.object({batchId:z.string().uuid(),schemaVersion:z.literal('2026-10-25'),observations:z.array(observation).min(1).max(250)}).strict();
 
@@ -56,13 +61,13 @@ export interface CollectorVerifier {
   verify(request: CollectorVerificationRequest): Promise<boolean>;
 }
 
-export function buildServer(options:{store?:Store;adminSecret?:string;intelligenceEngine?:IntelligenceEngine;walletEngine?:WalletEngine;permissionsEngine?:PermissionsEngine;consentRepository?:ConsentRepository;deviceRepository?:DeviceRepository;metadataRepository?:MetadataRepository;collectorVerifier?:CollectorVerifier}={}){
+export function buildServer(options:{store?:Store;adminSecret?:string;intelligenceEngine?:IntelligenceEngine;walletEngine?:WalletEngine;permissionsEngine?:PermissionsEngine;consentRepository?:ConsentRepository;deviceRepository?:DeviceRepository;metadataRepository?:MetadataRepository;collectorVerifier?:CollectorVerifier;identityVerifier?:DeviceIdentityVerifier;trustedProxies?:string[]}={}){
   const store=options.store??memoryStore();
   const adminSecret=options.adminSecret??process.env.KICKS_STAGING_ADMIN_SECRET??'';
   const engine = options.intelligenceEngine ?? new IntelligenceEngine();
   const permissionsEngine = options.permissionsEngine ?? new PermissionsEngine(engine);
   const walletEngine = options.walletEngine ?? new WalletEngine(engine, permissionsEngine);
-  const app=Fastify({logger:{redact:['req.headers.authorization','req.headers.x-admin-secret']},genReqId:()=>randomUUID(),bodyLimit:256000});
+  const app=Fastify({logger:{redact:['req.headers.authorization','req.headers.x-admin-secret']},genReqId:()=>randomUUID(),bodyLimit:256000,trustProxy:options.trustedProxies??false});
   app.register(cors,{origin:true});
   app.register(rateLimit,{global:false,max:60,timeWindow:'1 minute'});
   let checkRateLimit: ReturnType<typeof app.rateLimit> | undefined;
@@ -73,8 +78,35 @@ export function buildServer(options:{store?:Store;adminSecret?:string;intelligen
   app.addHook('onSend',async(_q,r,p)=>{r.header('cache-control','no-store').header('x-content-type-options','nosniff');return p});
   app.get('/health',async()=>({status:'ok',service:'kicks-api',mode:'staging',collector:'metadata-only'}));
 
-  const authenticate=async(authorization?:string)=>{const[scheme,token]=authorization?.split(' ')??[];if(scheme!=='Bearer'||!token)return null;const tokenHash=hash(token);if(options.deviceRepository)return options.deviceRepository.findActiveByTokenHash(tokenHash);return[...store.devices.values()].find(d=>!d.revoked&&equal(d.tokenHash,tokenHash))??null};
+  const authenticate=async(authorization?:string)=>{const[scheme,token,...extra]=authorization?.split(' ')??[];if(scheme!=='Bearer'||!token||extra.length||/\s/.test(token))return null;const tokenHash=hash(token);if(options.deviceRepository)return options.deviceRepository.findActiveByTokenHash(tokenHash);return[...store.devices.values()].find(d=>!d.revoked&&equal(d.tokenHash,tokenHash))??null};
   app.post('/v1/staging/devices',async(q,r)=>{if(!adminSecret||!equal(hash(String(q.headers['x-admin-secret']??'')),hash(adminSecret)))return r.code(403).send({error:'forbidden'});const parsed=z.object({subjectId:z.string().uuid()}).strict().safeParse(q.body);if(!parsed.success)return r.code(400).send({error:'invalid_request'});const token=randomBytes(32).toString('base64url'),device:Device={id:randomUUID(),subjectId:parsed.data.subjectId,tokenHash:hash(token),revoked:false};if(options.deviceRepository){try{await options.deviceRepository.create(device,process.env.NODE_ENV==='production'?'production':'staging')}catch(error){q.log.error({err:error},'device persistence failed');return r.header('retry-after','1').code(503).send({error:'device_persistence_unavailable',retryable:true})}}else{store.devices.set(device.id,device)}return r.code(201).send({deviceId:device.id,token,tokenType:'Bearer'})});
+  app.post('/v1/devices/enroll',async(q,r)=>{
+    if(!options.identityVerifier)return r.header('retry-after','1').code(503).send({error:'identity_verification_unavailable',retryable:true});
+    if(q.protocol!=='https')return r.code(403).send({error:'https_required'});
+    if(q.body!==undefined&&!z.object({}).strict().safeParse(q.body).success)return r.code(400).send({error:'invalid_request'});
+    const[scheme,identityToken,...extra]=q.headers.authorization?.split(' ')??[];
+    if(scheme!=='Bearer'||!identityToken||extra.length||/\s/.test(identityToken))return r.code(401).send({error:'unauthorized'});
+    let identity;
+    try{identity=await options.identityVerifier.verify(identityToken)}catch(error){
+      if(error instanceof OidcVerificationError&&error.kind==='unavailable'){
+        q.log.error({err:error},'OIDC identity verification unavailable');
+        return r.header('retry-after','1').code(503).send({error:'identity_verification_unavailable',retryable:true});
+      }
+      return r.code(401).send({error:'invalid_identity_token'});
+    }
+    if(!identity.issuer||!identity.subject?.trim())return r.code(401).send({error:'invalid_identity_token'});
+    const token=randomBytes(32).toString('base64url');
+    const device:Device={id:randomUUID(),subjectId:oidcSubjectId(identity.issuer,identity.subject),tokenHash:hash(token),revoked:false};
+    try{
+      if(options.deviceRepository)await options.deviceRepository.create(device,process.env.NODE_ENV==='production'?'production':'staging');
+      else store.devices.set(device.id,device);
+    }catch(error){
+      q.log.error({err:error},'device persistence failed');
+      return r.header('retry-after','1').code(503).send({error:'device_persistence_unavailable',retryable:true});
+    }
+    return r.code(201).send({deviceId:device.id,subjectId:device.subjectId,token,tokenType:'Bearer'});
+  });
+  app.get('/v1/devices/session',async(q,r)=>{let device:Awaited<ReturnType<typeof authenticate>>;try{device=await authenticate(q.headers.authorization)}catch(error){q.log.error({err:error},'device session authentication unavailable');return r.header('retry-after','1').code(503).send({error:'device_authentication_unavailable',retryable:true})}if(!device)return r.code(401).send({error:'unauthorized'});return r.code(200).send({deviceId:device.id,subjectId:device.subjectId})});
   app.post('/v1/devices/revoke',async(q,r)=>{let device: Awaited<ReturnType<typeof authenticate>>;try{device=await authenticate(q.headers.authorization)}catch(error){q.log.error({err:error},'device revocation authentication unavailable');return r.header('retry-after','1').code(503).send({error:'device_authentication_unavailable',retryable:true})}if(!device)return r.code(401).send({error:'unauthorized'});try{if(options.deviceRepository){const revoked=await options.deviceRepository.revokeByTokenHash(device.tokenHash);if(!revoked)return r.code(409).send({error:'device_already_revoked'});}else{const stored=store.devices.get(device.id);if(!stored||stored.revoked)return r.code(409).send({error:'device_already_revoked'});stored.revoked=true;}return r.code(200).send({deviceId:device.id,revoked:true,monitoringDefaultOn:false})}catch(error){q.log.error({err:error},'device revocation persistence failed');return r.header('retry-after','1').code(503).send({error:'device_revocation_unavailable',retryable:true})}});
   app.post('/v1/consent-events', async (q, r) => {
     let device: Awaited<ReturnType<typeof authenticate>>;

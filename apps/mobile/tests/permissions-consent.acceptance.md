@@ -1,6 +1,6 @@
 # KICK-011D consent, collector, and Android acceptance
 
-Each numbered case is explicitly designated **Automated** or **Manual**. “Automated — existing” identifies current test coverage, not a claim that the suite ran during this documentation-only revision. API persistence integration tests require `KICKS_TEST_DATABASE_URL`; they may be skipped otherwise. The mobile consent screen has no authenticated enrollment/session provider wired in this tree, so UI/device cases requiring a session are proposed gates, not currently executable acceptance.
+Each numbered case is explicitly designated **Automated** or **Manual**. “Automated — existing” identifies current test coverage, not a claim that the suite ran during this revision. API persistence integration tests require `KICKS_TEST_DATABASE_URL`; they may be skipped otherwise. The mobile consent session provider restores and verifies secure device credentials, but no identity-token provider is registered, so login/enrollment remains unavailable until an actual provider is added. UI/device cases requiring a session remain proposed gates, not currently executable acceptance.
 
 The current native collector is unavailable and disabled. No collector start/resume/background lifecycle, OS-revocation handling, or queued-batch drain path is implemented. Cases describing those behaviors are future gates only; they must not be read as evidence those paths exist. Consent events never by themselves imply OS authorization or data collection.
 

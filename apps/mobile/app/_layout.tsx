@@ -1,5 +1,8 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { bootstrapDeviceSession } from '../services/deviceSession';
+
+bootstrapDeviceSession();
 
 const icons: Record<string, keyof typeof Ionicons.glyphMap> = {
   index: 'home-outline', engine: 'scan-outline', permissions: 'shield-checkmark-outline',

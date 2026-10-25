@@ -14,6 +14,7 @@ import {
   stableConsentRequestId,
   stableConsentUuid
 } from '../services/consentApi';
+import { DeviceSessionError } from '../services/deviceSession';
 import {
   AppPermission,
   BuyerPermission,
@@ -142,7 +143,9 @@ export default function Permissions() {
       const failed = histories.filter(item => item.historyStatus === 'error').length;
       setLoadState(failed === histories.length && histories.length > 0 ? 'offline' : 'ready');
     } catch (error) {
-      setLoadState(error instanceof ConsentApiError && error.retryable ? 'offline' : 'error');
+      const sessionUnavailable = error instanceof DeviceSessionError &&
+        (error.status === 503 || error.code === 'network_unavailable' || error.code === 'service_unconfigured');
+      setLoadState(sessionUnavailable || (error instanceof ConsentApiError && error.retryable) ? 'offline' : 'error');
     }
   }, []);
 
