@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { memo, useCallback, useState, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -181,7 +181,7 @@ export function ActivityFeed() {
   const [searchQuery, setSearchQuery] = useState('');
   const [simIndex, setSimIndex] = useState(0);
 
-  const simulateNewEvent = () => {
+  const simulateNewEvent = useCallback(() => {
     const nextItem = SIMULATED_POOL[simIndex % SIMULATED_POOL.length];
     if (!nextItem) return;
     const newItem: ActivityItem = {
@@ -191,7 +191,7 @@ export function ActivityFeed() {
     };
     setItems(prev => [newItem, ...prev.slice(0, 15)]);
     setSimIndex(v => v + 1);
-  };
+  }, [simIndex]);
 
   const counts = useMemo(() => {
     return {
@@ -222,9 +222,9 @@ export function ActivityFeed() {
     });
   }, [items, filter, searchQuery]);
 
-  const toggleExpand = (id: string) => {
+  const toggleExpand = useCallback((id: string) => {
     setExpandedId(prev => (prev === id ? null : id));
-  };
+  }, []);
 
   return (
     <View style={feedStyles.container}>
@@ -288,27 +288,31 @@ export function ActivityFeed() {
           label="All"
           count={counts.all}
           active={filter === 'all'}
-          onPress={() => setFilter('all')}
+          value="all"
+          onPress={setFilter}
         />
         <FilterChip
           label="Connections"
           count={counts.connection}
           active={filter === 'connection'}
-          onPress={() => setFilter('connection')}
+          value="connection"
+          onPress={setFilter}
           icon="globe-outline"
         />
         <FilterChip
           label="Privacy Events"
           count={counts.privacy}
           active={filter === 'privacy'}
-          onPress={() => setFilter('privacy')}
+          value="privacy"
+          onPress={setFilter}
           icon="shield-checkmark-outline"
         />
         <FilterChip
           label="Review"
           count={counts.review}
           active={filter === 'review'}
-          onPress={() => setFilter('review')}
+          value="review"
+          onPress={setFilter}
           badgeColor={counts.review > 0 ? colors.orange : undefined}
         />
       </View>
@@ -341,7 +345,7 @@ export function ActivityFeed() {
               key={item.id}
               item={item}
               isExpanded={isExpanded}
-              onToggle={() => toggleExpand(item.id)}
+              onToggle={toggleExpand}
             />
           );
         })
@@ -350,7 +354,8 @@ export function ActivityFeed() {
   );
 }
 
-function FilterChip({
+const FilterChip = memo(function FilterChip({
+  value,
   label,
   count,
   active,
@@ -358,16 +363,17 @@ function FilterChip({
   icon,
   badgeColor
 }: {
+  value: FilterType;
   label: string;
   count: number;
   active: boolean;
-  onPress: () => void;
+  onPress: (value: FilterType) => void;
   icon?: keyof typeof Ionicons.glyphMap;
   badgeColor?: string;
 }) {
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => onPress(value)}
       style={[feedStyles.chip, active && feedStyles.chipActive]}
     >
       {icon && (
@@ -399,16 +405,16 @@ function FilterChip({
       </View>
     </Pressable>
   );
-}
+});
 
-function ActivityCard({
+const ActivityCard = memo(function ActivityCard({
   item,
   isExpanded,
   onToggle
 }: {
   item: ActivityItem;
   isExpanded: boolean;
-  onToggle: () => void;
+  onToggle: (id: string) => void;
 }) {
   const isConnection = item.type === 'connection';
 
@@ -445,7 +451,7 @@ function ActivityCard({
 
   return (
     <Card accent={item.status === 'Review' || item.isLive}>
-      <Pressable onPress={onToggle} style={feedStyles.cardPressable}>
+      <Pressable onPress={() => onToggle(item.id)} style={feedStyles.cardPressable}>
         {/* Top line: Icon, Target & Status */}
         <View style={ui.row}>
           <View style={feedStyles.iconAndHeading}>
@@ -560,7 +566,7 @@ function ActivityCard({
       </Pressable>
     </Card>
   );
-}
+});
 
 const feedStyles = StyleSheet.create({
   container: {

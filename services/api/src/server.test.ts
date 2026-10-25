@@ -1,4 +1,4 @@
-import test from 'node:test';import assert from 'node:assert/strict';import{buildServer,memoryStore}from'./server.js';import{randomUUID}from'node:crypto';
+import test from 'node:test';import assert from 'node:assert/strict';import{buildServer,memoryStore,IntelligenceEngine,MAX_EVENTS}from'./server.js';import{randomUUID}from'node:crypto';
 const setup=async()=>{const store=memoryStore(),app=buildServer({store,adminSecret:'staging-secret'}),subjectId=randomUUID();const r=await app.inject({method:'POST',url:'/v1/staging/devices',headers:{'x-admin-secret':'staging-secret'},payload:{subjectId}});return{app,store,token:r.json().token as string}};
 test('health reports metadata-only staging',async()=>{const app=buildServer(),r=await app.inject({method:'GET',url:'/health'});assert.equal(r.json().collector,'metadata-only');await app.close()});
 test('serves web app index.html on root path',async()=>{const app=buildServer(),r=await app.inject({method:'GET',url:'/'});assert.equal(r.statusCode,200);assert.match(r.headers['content-type']??'',/text\/html/);await app.close()});
@@ -176,6 +176,8 @@ test('wallet mechanic endpoints satisfy openapi contract', async () => {
   const earn = earnRes.json();
   assert.ok(earn.ledger_entry);
   assert.ok(earn.wallet);
+  assert.ok(earn.summary);
+  assert.ok(Array.isArray(earn.ledger.items));
   assert.ok(earn.progression_update);
   assert.equal(earn.ledger_entry.event_id, 'evt-test-earn-01');
 
@@ -192,6 +194,8 @@ test('wallet mechanic endpoints satisfy openapi contract', async () => {
   const payout = payoutRes.json();
   assert.ok(payout.payout);
   assert.ok(payout.wallet);
+  assert.ok(payout.summary);
+  assert.ok(Array.isArray(payout.ledger.items));
   assert.equal(payout.payout.amount, 5.00);
   assert.equal(payout.payout.method, 'partner_credit');
   assert.equal(payout.payout.status, 'completed');
@@ -419,3 +423,19 @@ test('branding endpoints return official brand and mascot specification', async 
 
 
 
+
+test('intelligence engine caps retained events and keeps per-app index consistent', () => {
+  const engine = new IntelligenceEngine();
+  const mk = (id: string) => ({
+    event_id: id,
+    timestamp: new Date().toISOString(),
+    app_id: 'com.cap.test',
+    device_id: 'dev-cap',
+    network: { domain: 'analytics.adservice.net', endpoint: '/t', method: 'POST', bytes_out: 10, bytes_in: 10 }
+  }) as unknown as Parameters<IntelligenceEngine['processEvent']>[0];
+  for (let i = 0; i < MAX_EVENTS + 25; i++) engine.processEvent(mk(`cap-${i}`));
+  assert.equal(engine.getEvent('cap-0'), null);
+  assert.ok(engine.getEvent(`cap-${MAX_EVENTS + 24}`));
+  assert.ok(engine.getEvent('evt-shop-sample-01') === null || engine.getEvent('evt-shop-sample-01'));
+  assert.equal(engine.getAppSummary('com.cap.test').total_events, MAX_EVENTS);
+});

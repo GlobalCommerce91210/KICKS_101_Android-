@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { IntelligenceEngine } from './intelligence.js';
-import { PermissionsEngine } from './permissions.js';
+import { MetadataPermission, PermissionsEngine } from './permissions.js';
 
 export interface WalletAccount {
   wallet_id: string;
@@ -64,7 +64,18 @@ export interface ProgressionState {
   };
 }
 
+export const MAX_LEDGER_ENTRIES_PER_USER = 1_000;
+export const MAX_PAYOUTS_PER_USER = 200;
+
+interface PermissionSnapshot {
+  version: number;
+  blockedApps: Set<string>;
+  blockedBuyers: Set<string>;
+  metadataByApp: Map<string, Map<string, MetadataPermission>>;
+}
+
 export class WalletEngine {
+  private permissionSnapshots = new Map<string, PermissionSnapshot>();
   private wallets = new Map<string, WalletAccount>();
   private ledgers = new Map<string, WalletLedgerEntry[]>();
   private progressions = new Map<string, ProgressionState>();
@@ -80,6 +91,7 @@ export class WalletEngine {
 
   public setPermissionsEngine(permissionsEngine: PermissionsEngine) {
     this.permissionsEngine = permissionsEngine;
+    this.permissionSnapshots.clear();
   }
 
   private seedDefaultUser(userId: string) {
@@ -224,29 +236,68 @@ export class WalletEngine {
     return wallet;
   }
 
+  private getPermissionSnapshot(userId: string): PermissionSnapshot {
+    const permissions = this.permissionsEngine!;
+    // Resolve permissions first so lazy seeding happens before the version is read
+    const apps = permissions.getAppPermissions(userId);
+    const buyers = permissions.getBuyerPermissions(userId);
+    const version = permissions.getVersion(userId);
+    const cached = this.permissionSnapshots.get(userId);
+    if (cached && cached.version === version) {
+      return cached;
+    }
+    const snapshot: PermissionSnapshot = {
+      version,
+      blockedApps: new Set(apps.filter(a => a.state === 'blocked').map(a => a.app_id)),
+      blockedBuyers: new Set(buyers.filter(b => b.state === 'blocked').map(b => b.buyer_category)),
+      metadataByApp: new Map()
+    };
+    this.permissionSnapshots.set(userId, snapshot);
+    return snapshot;
+  }
+
+  private getMetadataPermissionMap(userId: string, appId: string, snapshot: PermissionSnapshot): Map<string, MetadataPermission> {
+    let metaPerms = snapshot.metadataByApp.get(appId);
+    if (!metaPerms) {
+      metaPerms = new Map();
+      for (const p of this.permissionsEngine!.getMetadataPermissions(userId, appId)) {
+        if (!metaPerms.has(p.metadata_type)) metaPerms.set(p.metadata_type, p);
+      }
+      snapshot.metadataByApp.set(appId, metaPerms);
+    }
+    return metaPerms;
+  }
+
+  private pushLedgerEntry(userId: string, entry: WalletLedgerEntry) {
+    const list = this.ledgers.get(userId) ?? [];
+    list.unshift(entry);
+    if (list.length > MAX_LEDGER_ENTRIES_PER_USER) {
+      list.length = MAX_LEDGER_ENTRIES_PER_USER;
+    }
+    this.ledgers.set(userId, list);
+  }
+
   private isEntryPermitted(userId: string, entry: WalletLedgerEntry): { permitted: boolean; reason: string | null } {
     if (!this.permissionsEngine) {
       return { permitted: true, reason: null };
     }
 
+    const snapshot = this.getPermissionSnapshot(userId);
+
     // 1. App-level check
-    const apps = this.permissionsEngine.getAppPermissions(userId);
-    const appPerm = apps.find(a => a.app_id === entry.app_id);
-    if (appPerm && appPerm.state === 'blocked') {
+    if (snapshot.blockedApps.has(entry.app_id)) {
       return { permitted: false, reason: `App ${entry.app_id} is blocked by user permission policy` };
     }
 
     // 2. Buyer category check
-    const buyers = this.permissionsEngine.getBuyerPermissions(userId);
-    const buyerPerm = buyers.find(b => b.buyer_category === entry.buyer_category);
-    if (buyerPerm && buyerPerm.state === 'blocked') {
+    if (snapshot.blockedBuyers.has(entry.buyer_category)) {
       return { permitted: false, reason: `Buyer category '${entry.buyer_category}' is blocked` };
     }
 
     // 3. Metadata permissions check for this app
-    const metaPerms = this.permissionsEngine.getMetadataPermissions(userId, entry.app_id);
+    const metaPerms = this.getMetadataPermissionMap(userId, entry.app_id, snapshot);
     for (const mtype of entry.metadata_types) {
-      const perm = metaPerms.find(p => p.metadata_type === mtype);
+      const perm = metaPerms.get(mtype);
       if (perm) {
         if (perm.state === 'blocked') {
           return { permitted: false, reason: `Metadata type '${mtype}' is blocked for ${entry.app_id}` };
@@ -456,9 +507,7 @@ export class WalletEngine {
       candidateEntry.denial_reason = permCheck.reason;
       candidateEntry.status = 'rejected';
 
-      const ledgerList = this.ledgers.get(targetUserId) ?? [];
-      ledgerList.unshift(candidateEntry);
-      this.ledgers.set(targetUserId, ledgerList);
+      this.pushLedgerEntry(targetUserId, candidateEntry);
 
       return {
         permitted: false,
@@ -470,9 +519,7 @@ export class WalletEngine {
     }
 
     // Permitted: commit earnings and progression
-    const ledgerList = this.ledgers.get(targetUserId) ?? [];
-    ledgerList.unshift(candidateEntry);
-    this.ledgers.set(targetUserId, ledgerList);
+    this.pushLedgerEntry(targetUserId, candidateEntry);
 
     wallet.approved_balance = Number((wallet.approved_balance + (baseValue * multiplier)).toFixed(2));
     wallet.bonus_balance = Number((wallet.bonus_balance + bonus).toFixed(2));
@@ -510,11 +557,11 @@ export class WalletEngine {
       const ledger = this.ledgers.get(userId) ?? [];
       const approvedEntries = ledger.filter(e => e.status === 'approved' || e.status === 'settled');
 
+      const snapshot = this.getPermissionSnapshot(userId);
+
       // 1. Check if any approved earning in history came from a currently blocked app
-      const apps = this.permissionsEngine.getAppPermissions(userId);
-      const blockedApps = new Set(apps.filter(a => a.state === 'blocked').map(a => a.app_id));
       for (const entry of approvedEntries) {
-        if (blockedApps.has(entry.app_id)) {
+        if (snapshot.blockedApps.has(entry.app_id)) {
           return {
             permitted: false,
             denial_reason: `Payout denied: earning source ${entry.app_id} is blocked by user policy`,
@@ -524,10 +571,8 @@ export class WalletEngine {
       }
 
       // 2. Check if any approved earning in history was purchased by a currently blocked buyer
-      const buyers = this.permissionsEngine.getBuyerPermissions(userId);
-      const blockedBuyers = new Set(buyers.filter(b => b.state === 'blocked').map(b => b.buyer_category));
       for (const entry of approvedEntries) {
-        if (blockedBuyers.has(entry.buyer_category)) {
+        if (snapshot.blockedBuyers.has(entry.buyer_category)) {
           return {
             permitted: false,
             denial_reason: `Payout denied: earning buyer category '${entry.buyer_category}' is currently blocked`,
@@ -538,9 +583,9 @@ export class WalletEngine {
 
       // 3. Check if any metadata type in approved earnings is currently blocked
       for (const entry of approvedEntries) {
-        const metaPerms = this.permissionsEngine.getMetadataPermissions(userId, entry.app_id);
+        const metaPerms = this.getMetadataPermissionMap(userId, entry.app_id, snapshot);
         for (const mtype of entry.metadata_types) {
-          const mPerm = metaPerms.find(p => p.metadata_type === mtype);
+          const mPerm = metaPerms.get(mtype);
           if (mPerm && mPerm.state === 'blocked') {
             return {
               permitted: false,
@@ -568,6 +613,9 @@ export class WalletEngine {
 
     const payoutList = this.payouts.get(userId) ?? [];
     payoutList.unshift(payout);
+    if (payoutList.length > MAX_PAYOUTS_PER_USER) {
+      payoutList.length = MAX_PAYOUTS_PER_USER;
+    }
     this.payouts.set(userId, payoutList);
 
     return {

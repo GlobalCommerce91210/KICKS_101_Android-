@@ -238,8 +238,11 @@ export function getDefaultGates(appId: string): AppMetadataGates {
   };
 }
 
+export const MAX_EVENTS = 10_000;
+
 export class IntelligenceEngine {
   private events = new Map<string, IntelligenceEventView>();
+  private eventsByApp = new Map<string, Set<string>>();
   private appGates = new Map<string, AppMetadataGates>();
   private offers: MarketplaceOffer[] = [...INITIAL_MARKETPLACE_OFFERS];
 
@@ -310,6 +313,47 @@ export class IntelligenceEngine {
   public updateGates(appId: string, updated: AppMetadataGates): AppMetadataGates {
     this.appGates.set(appId, { ...updated, app_id: appId });
     return this.appGates.get(appId)!;
+  }
+
+  private storeEvent(view: IntelligenceEventView) {
+    const existing = this.events.get(view.event_id);
+    if (existing) {
+      this.removeFromAppIndex(existing);
+      this.events.delete(view.event_id);
+    }
+    this.events.set(view.event_id, view);
+    let ids = this.eventsByApp.get(view.app_id);
+    if (!ids) {
+      ids = new Set();
+      this.eventsByApp.set(view.app_id, ids);
+    }
+    ids.add(view.event_id);
+
+    let excess = this.events.size - MAX_EVENTS;
+    if (excess > 0) {
+      for (const id of [...this.events.keys()]) {
+        if (excess-- <= 0) break;
+        const old = this.events.get(id);
+        if (old) this.removeFromAppIndex(old);
+        this.events.delete(id);
+      }
+    }
+  }
+
+  private removeFromAppIndex(view: IntelligenceEventView) {
+    const ids = this.eventsByApp.get(view.app_id);
+    if (!ids) return;
+    ids.delete(view.event_id);
+    if (ids.size === 0) this.eventsByApp.delete(view.app_id);
+  }
+
+  private getAppEvents(appId: string): IntelligenceEventView[] {
+    const result: IntelligenceEventView[] = [];
+    for (const id of this.eventsByApp.get(appId) ?? []) {
+      const ev = this.events.get(id);
+      if (ev) result.push(ev);
+    }
+    return result;
   }
 
   public getEvent(eventId: string): IntelligenceEventView | null {
@@ -481,13 +525,13 @@ export class IntelligenceEngine {
       metadata_inspection: inspection
     };
 
-    this.events.set(event.event_id, view);
+    this.storeEvent(view);
     return view;
   }
 
   public matchMarketplace(req: MarketplaceMatchRequest): MarketplaceMatchResult {
     const gates = this.getGates(req.app_id);
-    const appEvents = [...this.events.values()].filter(e => e.app_id === req.app_id);
+    const appEvents = this.getAppEvents(req.app_id);
 
     const allowedTypes = new Set(
       gates.gates
@@ -536,7 +580,7 @@ export class IntelligenceEngine {
       period_end: periodEnd
     });
 
-    const appEvents = [...this.events.values()].filter(e => e.app_id === appId);
+    const appEvents = this.getAppEvents(appId);
     const total_events = appEvents.length > 0 ? appEvents.length : marketplace_summary.total_events;
 
     const category_distribution: Record<string, number> = {
