@@ -34,8 +34,12 @@ export class PostgresConsentRepository implements ConsentRepository {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      // Serialize changes to a permission so ownership checks and event ordering cannot race.
-      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [input.permissionId]);
+      // Lock both the globally unique idempotency key and the permission stream.
+      // Sorting gives every transaction the same lock order and avoids deadlocks.
+      const lockKeys = [`permission:${input.permissionId}`, `request:${input.requestId}`].sort();
+      for (const lockKey of lockKeys) {
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [lockKey]);
+      }
       const duplicate = await client.query<{ id: string; subject_id: string; permission_id: string; action: ConsentAction; policy_version: string; purpose_version: string; purpose: string; occurred_at: Date | string }>(
         'SELECT id, subject_id, permission_id, action, policy_version, purpose_version, purpose, occurred_at FROM consent_events WHERE request_id = $1',
         [input.requestId]
