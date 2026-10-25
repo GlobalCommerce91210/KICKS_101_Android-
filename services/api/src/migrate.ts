@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { Pool } from 'pg';
 
 const connectionString = process.env.DATABASE_URL;
@@ -17,10 +17,13 @@ try {
   if (!table.rows[0]?.table_name) {
     throw new Error('Base schema is missing. Apply services/api/db/schema.sql to the intended database before running this migration.');
   }
-  const sql = await readFile(new URL('../db/migrations/20261025_consent_purpose.sql', import.meta.url), 'utf8');
-  await client.query(sql);
+  const dir = new URL('../db/migrations/', import.meta.url);
+  for (const file of (await readdir(dir)).filter(name => name.endsWith('.sql')).sort()) {
+    await client.query(await readFile(new URL(file, dir), 'utf8'));
+    process.stdout.write(`Applied ${file}\n`);
+  }
   await client.query('COMMIT');
-  process.stdout.write('KICK-011A consent migration applied successfully.\n');
+  process.stdout.write('Migrations applied successfully.\n');
 } catch (error) {
   await client.query('ROLLBACK').catch(() => undefined);
   throw error;

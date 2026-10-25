@@ -57,8 +57,11 @@ Valid subject → device owned by subject → active device enrollment → lates
 ### Eligibility states
 `BLOCKED_NO_CONSENT`, `BLOCKED_STAMP_PENDING`, `BLOCKED_VERIFICATION_FAILED`, `BLOCKED_DEVICE_NOT_ENROLLED`, `BLOCKED_OS_PERMISSION`, `BLOCKED_REVOKED`, `BLOCKED_POLICY`, `BLOCKED_SERVICE_UNAVAILABLE`, `ELIGIBLE`. Denials return `{eligible:false,state,error}` (403, or 503 + `retry-after` when evidence is transiently unavailable). The Android client treats this as informational; the backend stays authoritative.
 
-### Blocking dependencies (KICK-011A/B)
-The repository has persistent consent decisions/revocation and device tokens, but **no** immutable consent receipts, decision-version linkage, blockchain proof records, verifier, device enrollment state, OS-permission attestation, safety policy store or revocation epoch. No production `CollectorEvidenceProvider` exists, so production authorization is denied everywhere until those are implemented. Simulated evidence lives only in `src/test-support.ts`.
+### Evidence storage and provider (build step 1)
+`db/migrations/20261026_collector_evidence.sql` adds `consent_receipts` (immutable), `chain_proofs` (stamper attempts, non-authorizing), `proof_verifications` (append-only, written only by the independent verifier), `device_enrollments`, `os_permission_attestations`, `safety_policies` and `revocation_epochs` (bumped by a trigger on every consent decision, inside the same transaction). `PostgresCollectorEvidenceProvider` maps these rows to evidence; absent rows deny. A proof counts as independently verified only if the verification is `VERIFIED`, on `KICKS_REQUIRED_CHAIN` (CAIP-2, unset => nothing verifies), finality reached, provider quorum >= 2, and the verifier identity differs from the stamper's.
+
+### Still missing (blocking production enablement)
+Nothing writes these tables yet: the receipt hashing/anchoring (stamper) worker, the independent verifier service with multi-provider quorum, Play Integrity attestation ingestion, and safety-policy administration. Until they run, every authorization is denied. A chain and finality policy must still be chosen. Simulated evidence lives only in `src/test-support.ts`.
 
 ### Migration / rollback
-No schema migration is included. A future provider needs tables for receipts, proofs and revocation epochs. Rollback = revert this change; the previous behaviour (consent-only checks) was less strict, so rollback is not recommended.
+Run `npm run migrate` (applies all files in `db/migrations`, idempotent) and set `KICKS_REQUIRED_CHAIN`. Rollback = revert this change and drop the new evidence tables and the `consent_events_bump_epoch` trigger; the previous behaviour (consent-only checks) was less strict, so rollback is not recommended.
