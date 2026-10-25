@@ -70,8 +70,10 @@ export default function Engine() {
         </Text>
         <Text style={s.disclosure}>MONITORING OFF BY DEFAULT · DEMO DATA IS NOT LIVE TRAFFIC</Text>
         <View style={s.actions}>
-          <Pressable onPress={requestVpn} style={s.button}>
-            <Text style={s.buttonText}>Check / authorize VPN</Text>
+          <Pressable onPress={requestVpn} disabled={loading || !status?.collectorEnabled} style={[s.button, (loading || !status?.collectorEnabled) && s.buttonDisabled]}>
+            <Text style={[s.buttonText, (loading || !status?.collectorEnabled) && s.buttonTextDisabled]}>
+              {status?.collectorEnabled ? 'Check / authorize VPN' : 'VPN authorization unavailable'}
+            </Text>
           </Pressable>
           <Pressable onPress={startCollector} disabled={!canStart} style={[s.button, !canStart && s.buttonDisabled]}>
             <Text style={[s.buttonText, !canStart && s.buttonTextDisabled]}>Start verified collector</Text>

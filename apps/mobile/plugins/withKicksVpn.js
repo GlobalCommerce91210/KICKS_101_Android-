@@ -25,17 +25,6 @@ module.exports = function withKicksVpn(config) {
 
   config = withAndroidManifest(config, config => {
     const manifest = config.modResults.manifest;
-    manifest['uses-permission'] ??= [];
-    for (const permission of [
-      'android.permission.FOREGROUND_SERVICE',
-      'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
-      'android.permission.POST_NOTIFICATIONS'
-    ]) {
-      if (!manifest['uses-permission'].some(item => item.$['android:name'] === permission)) {
-        manifest['uses-permission'].push({ $: { 'android:name': permission } });
-      }
-    }
-
     const application = manifest.application?.[0];
     if (!application) throw new Error('Android application element is missing');
     application.service ??= [];
@@ -44,15 +33,8 @@ module.exports = function withKicksVpn(config) {
         $: {
           'android:name': '.vpn.KicksVpnService',
           'android:permission': 'android.permission.BIND_VPN_SERVICE',
-          'android:exported': 'false',
-          'android:foregroundServiceType': 'specialUse'
+          'android:exported': 'false'
         },
-        property: [{
-          $: {
-            'android:name': 'android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE',
-            'android:value': 'User-authorized, metadata-only privacy monitoring VPN'
-          }
-        }],
         'intent-filter': [{
           action: [{ $: { 'android:name': 'android.net.VpnService' } }]
         }]

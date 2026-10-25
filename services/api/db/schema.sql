@@ -5,12 +5,13 @@ CREATE TABLE devices (
 );
 
 CREATE TABLE consent_events (
-  id uuid PRIMARY KEY, event_sequence bigint NOT NULL, request_id uuid NOT NULL UNIQUE, subject_id uuid NOT NULL, permission_id uuid NOT NULL,
+  id uuid PRIMARY KEY, event_sequence bigint NOT NULL, request_id uuid NOT NULL, subject_id uuid NOT NULL, permission_id uuid NOT NULL,
   action text NOT NULL CHECK (action IN ('grant','deny','revoke')),
   policy_version text NOT NULL, purpose_version text NOT NULL, purpose text NOT NULL, expected_event_sequence bigint,
   occurred_at timestamptz NOT NULL DEFAULT now(), correlation_id uuid NOT NULL
 );
 CREATE UNIQUE INDEX consent_events_permission_sequence_uq ON consent_events(permission_id, event_sequence);
+CREATE UNIQUE INDEX consent_events_request_id_uq ON consent_events(request_id);
 CREATE TABLE consent_permission_sequences (
   permission_id uuid PRIMARY KEY, last_sequence bigint NOT NULL CHECK (last_sequence >= 0)
 );

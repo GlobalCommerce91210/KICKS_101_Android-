@@ -1,21 +1,11 @@
 import { useState } from 'react';
-import { Alert, Linking, NativeModules, Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { BrandHeader, Card, Screen, colors, ui } from '../components/Brand';
 import { BRAND_MANIFEST } from '../constants/branding';
 
 export default function Settings() {
-  const [monitoring, setMonitoring] = useState(false);
   const [diagnostics, setDiagnostics] = useState(false);
   const unavailable = (action: string) => Alert.alert(`${action} unavailable in demo`, 'This control is visible now so it can be tested. It will connect to the DataStorm-owned control plane before collection is enabled.');
-  const changeMonitoring = async () => {
-    if (Platform.OS !== 'android' || !NativeModules.KicksVpn) return unavailable('Monitoring');
-    try {
-      if (monitoring) { await NativeModules.KicksVpn.stop(); setMonitoring(false); return; }
-      const result = await NativeModules.KicksVpn.requestAuthorization();
-      if (result === 'authorized') { await NativeModules.KicksVpn.start(); setMonitoring(true); }
-      else Alert.alert('Android authorization opened', 'After accepting the Android VPN prompt, return here to start the collector. Collection remains off until the production endpoint is configured.');
-    } catch (error) { Alert.alert('Collector not active', error instanceof Error ? error.message : 'The production collector is not configured.'); }
-  };
 
   return <Screen>
     <BrandHeader section="Privacy and beta controls" />
@@ -24,10 +14,10 @@ export default function Settings() {
     <Text style={ui.body}>Monitoring stays off until you review the disclosure and give explicit permission on Android.</Text>
 
     <Card accent>
-      <SettingRow title="Exfiltration monitoring" detail="Metadata only · no message or payload contents">
-        <Switch value={monitoring} onValueChange={changeMonitoring} trackColor={{ false: '#493a32', true: '#8f4319' }} thumbColor={monitoring ? colors.orange : '#a69b94'} />
+      <SettingRow title="Exfiltration monitoring" detail="Unavailable in this build · no traffic is collected">
+        <Switch value={false} disabled trackColor={{ false: '#493a32', true: '#8f4319' }} thumbColor="#a69b94" />
       </SettingRow>
-      <Text style={s.status}>OFF · COLLECTING NOTHING</Text>
+      <Text style={s.status}>UNAVAILABLE · COLLECTING NOTHING</Text>
     </Card>
 
     <Card>

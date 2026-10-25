@@ -63,6 +63,10 @@ export const collectorApi = {
   },
   async requestAuthorization() {
     if (Platform.OS !== 'android' || !native) throw new Error('Android VPN collector unavailable on this platform.');
+    const status = await this.getStatus();
+    if (!status.collectorEnabled || status.state === 'UNAVAILABLE') {
+      throw new Error('The Android collector is unavailable in this build. No permissions were requested and monitoring remains off.');
+    }
     if (Number(Platform.Version) >= 33) {
       const permission = PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS;
       const result = await PermissionsAndroid.request(permission, {

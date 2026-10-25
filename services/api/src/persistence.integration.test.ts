@@ -379,3 +379,75 @@ test('consent migration preserves legacy rows and assigns non-authorizing purpos
     await adminPool.end();
   }
 });
+
+test('consent migration converts legacy global ordering once and remains compatible with new writes', { skip: !databaseUrl }, async () => {
+  const adminPool = new Pool({ connectionString: databaseUrl });
+  const schema = `kicks_sequence_migration_test_${randomUUID().replaceAll('-', '')}`;
+  let pool: Pool | undefined;
+  try {
+    await adminPool.query(`CREATE SCHEMA "${schema}"`);
+    pool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` });
+    await pool.query(`
+      CREATE TABLE consent_events (
+        id uuid PRIMARY KEY,
+        event_sequence bigserial UNIQUE NOT NULL,
+        subject_id uuid NOT NULL,
+        permission_id uuid NOT NULL,
+        action text NOT NULL CHECK (action IN ('grant','deny','revoke')),
+        policy_version text NOT NULL,
+        purpose_version text NOT NULL,
+        occurred_at timestamptz NOT NULL DEFAULT now(),
+        correlation_id uuid NOT NULL
+      )
+    `);
+    const subjectId = randomUUID();
+    const permissionId = randomUUID();
+    const otherPermissionId = randomUUID();
+    const firstId = randomUUID();
+    const otherId = randomUUID();
+    const secondId = randomUUID();
+    for (const [id, permission] of [
+      [firstId, permissionId],
+      [otherId, otherPermissionId],
+      [secondId, permissionId]
+    ]) {
+      await pool.query(
+        'INSERT INTO consent_events (id, subject_id, permission_id, action, policy_version, purpose_version, correlation_id) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        [id, subjectId, permission, 'grant', 'legacy-policy', 'legacy-purpose', randomUUID()]
+      );
+    }
+
+    const migration = await readFile(new URL('../db/migrations/20261025_consent_purpose.sql', import.meta.url), 'utf8');
+    await pool.query(migration);
+    const migrated = await pool.query(
+      'SELECT id, event_sequence FROM consent_events ORDER BY id'
+    );
+    const firstSequence = new Map(migrated.rows.map(row => [row.id, Number(row.event_sequence)]));
+    assert.equal(firstSequence.get(firstId), 1);
+    assert.equal(firstSequence.get(otherId), 1);
+    assert.equal(firstSequence.get(secondId), 2);
+
+    await pool.query(migration);
+    const repeated = await pool.query('SELECT id, event_sequence FROM consent_events ORDER BY id');
+    assert.deepEqual(
+      repeated.rows.map(row => [row.id, Number(row.event_sequence)]),
+      migrated.rows.map(row => [row.id, Number(row.event_sequence)])
+    );
+
+    const event = await new PostgresConsentRepository(pool).recordDecision({
+      permissionId,
+      requestId: randomUUID(),
+      expectedEventSequence: 2,
+      subjectId,
+      action: 'revoke',
+      policyVersion: 'privacy-test-1',
+      purposeVersion: 'network-safety-test-1',
+      purpose: 'Detect unexpected data destinations'
+    });
+    assert.equal(event.eventSequence, 3);
+  } finally {
+    await pool?.end().catch(() => undefined);
+    await adminPool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);
+    await adminPool.end();
+  }
+});
