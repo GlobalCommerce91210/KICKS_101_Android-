@@ -35,7 +35,7 @@ export class PostgresConsentRepository implements ConsentRepository {
       // Serialize changes to a permission so ownership checks and event ordering cannot race.
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [input.permissionId]);
       const prior = await client.query<{ subject_id: string }>(
-        'SELECT subject_id FROM consent_events WHERE permission_id = $1 ORDER BY occurred_at DESC, id DESC LIMIT 1',
+        'SELECT subject_id FROM consent_events WHERE permission_id = $1 ORDER BY event_sequence DESC LIMIT 1',
         [input.permissionId]
       );
       if (prior.rows[0] && prior.rows[0].subject_id !== input.subjectId) {
@@ -71,8 +71,7 @@ export class PostgresConsentRepository implements ConsentRepository {
     );
     const row = result.rows[0];
     if (!row) return null;
-    // The schema does not yet persist purpose. Until it does, protected ingestion must
-    // fail closed for PostgreSQL-backed consent rather than guess the purpose.
+    // Purpose is persisted with each event; legacy rows are explicitly non-authorizing.
     return {
       id: permissionId, subjectId: row.subject_id, purpose: row.purpose,
       policyVersion: row.policy_version, purposeVersion: row.purpose_version,
@@ -85,7 +84,7 @@ export class PostgresConsentRepository implements ConsentRepository {
       id: string; subject_id: string; action: ConsentAction; policy_version: string;
       purpose_version: string; purpose: string; occurred_at: Date | string;
     }>(
-      'SELECT id, subject_id, action, policy_version, purpose_version, purpose, occurred_at FROM consent_events WHERE permission_id = $1 AND subject_id = $2 ORDER BY occurred_at ASC, id ASC',
+      'SELECT id, subject_id, action, policy_version, purpose_version, purpose, occurred_at FROM consent_events WHERE permission_id = $1 AND subject_id = $2 ORDER BY event_sequence ASC',
       [permissionId, subjectId]
     );
     return result.rows.map(row => ({
