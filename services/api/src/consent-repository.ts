@@ -75,8 +75,8 @@ export class PostgresConsentRepository implements ConsentRepository {
       const id = randomUUID();
       const result = await client.query<{ occurred_at: Date | string }>(
         `INSERT INTO consent_events
-          (id, request_id, subject_id, permission_id, action, policy_version, purpose_version, purpose, correlation_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          (id, request_id, subject_id, permission_id, action, policy_version, purpose_version, purpose, expected_event_sequence, correlation_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING occurred_at`,
         [id, input.requestId, input.subjectId, input.permissionId, input.action, input.policyVersion, input.purposeVersion, input.purpose, input.expectedEventSequence ?? null, id]
       );
