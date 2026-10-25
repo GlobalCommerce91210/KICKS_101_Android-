@@ -179,6 +179,29 @@ test('PostgreSQL device identity and consent history survive an API restart', { 
     assert.equal(persistedBatch.rows[0]?.observation_count, 1);
     const persistedObservation = await pool!.query('SELECT id FROM metadata_observations WHERE id = $1', [acceptedEventId]);
     assert.equal(persistedObservation.rows.length, 1);
+    const replayedBatch = await app.inject({
+      method: 'POST',
+      url: '/v1/metadata-batches',
+      headers,
+      payload: {
+        batchId: acceptedBatchId,
+        schemaVersion: '2026-08-01',
+        observations: [{
+          eventId: acceptedEventId,
+          occurredAt: new Date().toISOString(),
+          sourceApp: 'com.example.test',
+          attribution: 'verified',
+          destinationHost: 'api.example.com',
+          protocol: 'tls',
+          bytesBucket: '1-10KB',
+          classification: 'expected',
+          consentId: permissionId,
+          consentPurpose: 'Detect unexpected data destinations'
+        }]
+      }
+    });
+    assert.equal(replayedBatch.statusCode, 409);
+    assert.equal(replayedBatch.json().error, 'replay_detected');
 
     const revoke = await app.inject({
       method: 'POST',
