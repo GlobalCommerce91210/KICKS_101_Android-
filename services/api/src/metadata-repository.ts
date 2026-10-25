@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import type { DeviceRecord } from './device-repository.js';
+import type { CollectorAuthorizationRequest } from './collector-authorization.js';
 
 export type MetadataObservation = {
   eventId: string;
@@ -19,13 +20,13 @@ export type MetadataBatch = {
   observations: MetadataObservation[];
 };
 export interface MetadataRepository {
-  ingestBatch(device: DeviceRecord, batch: MetadataBatch): Promise<{ batchId: string; accepted: number }>;
+  ingestBatch(device: DeviceRecord, batch: MetadataBatch, authorizeWithinTransaction: (request: CollectorAuthorizationRequest, transaction: unknown) => Promise<void>): Promise<{ batchId: string; accepted: number }>;
 }
 
 export class PostgresMetadataRepository implements MetadataRepository {
   constructor(private readonly pool: Pool) {}
 
-  async ingestBatch(device: DeviceRecord, batch: MetadataBatch): Promise<{ batchId: string; accepted: number }> {
+  async ingestBatch(device: DeviceRecord, batch: MetadataBatch, authorizeWithinTransaction: (request: CollectorAuthorizationRequest, transaction: unknown) => Promise<void>): Promise<{ batchId: string; accepted: number }> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -60,6 +61,11 @@ export class PostgresMetadataRepository implements MetadataRepository {
           (error as Error & { code?: string }).code = 'ACTIVE_PURPOSE_CONSENT_REQUIRED';
           throw error;
         }
+      }
+
+      // Re-authorize under the same transaction and permission locks immediately before writes.
+      for (const item of batch.observations) {
+        await authorizeWithinTransaction({ authenticatedSubject: device.subjectId, deviceId: device.id, consentScope: item.consentId, purpose: item.consentPurpose, requestedOperation: 'metadata.ingest' }, client);
       }
 
       await client.query(
