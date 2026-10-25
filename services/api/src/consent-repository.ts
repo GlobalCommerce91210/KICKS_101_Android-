@@ -40,13 +40,13 @@ export class PostgresConsentRepository implements ConsentRepository {
       for (const lockKey of lockKeys) {
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [lockKey]);
       }
-      const duplicate = await client.query<{ id: string; subject_id: string; permission_id: string; action: ConsentAction; policy_version: string; purpose_version: string; purpose: string; occurred_at: Date | string }>(
-        'SELECT id, subject_id, permission_id, action, policy_version, purpose_version, purpose, occurred_at FROM consent_events WHERE request_id = $1',
+      const duplicate = await client.query<{ id: string; subject_id: string; permission_id: string; action: ConsentAction; policy_version: string; purpose_version: string; purpose: string; expected_event_sequence: number | null; occurred_at: Date | string }>(
+        'SELECT id, subject_id, permission_id, action, policy_version, purpose_version, purpose, expected_event_sequence, occurred_at FROM consent_events WHERE request_id = $1',
         [input.requestId]
       );
       if (duplicate.rows[0]) {
         const row = duplicate.rows[0];
-        if (row.subject_id !== input.subjectId || row.permission_id !== input.permissionId || row.action !== input.action || row.policy_version !== input.policyVersion || row.purpose_version !== input.purposeVersion || row.purpose !== input.purpose) {
+        if (row.subject_id !== input.subjectId || row.permission_id !== input.permissionId || row.action !== input.action || row.policy_version !== input.policyVersion || row.purpose_version !== input.purposeVersion || row.purpose !== input.purpose || (row.expected_event_sequence ?? undefined) !== input.expectedEventSequence) {
           const error = new Error('idempotency_key_reused_with_different_request');
           (error as Error & { code?: string }).code = 'IDEMPOTENCY_CONFLICT';
           throw error;
@@ -78,7 +78,7 @@ export class PostgresConsentRepository implements ConsentRepository {
           (id, request_id, subject_id, permission_id, action, policy_version, purpose_version, purpose, correlation_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING occurred_at`,
-        [id, input.requestId, input.subjectId, input.permissionId, input.action, input.policyVersion, input.purposeVersion, input.purpose, id]
+        [id, input.requestId, input.subjectId, input.permissionId, input.action, input.policyVersion, input.purposeVersion, input.purpose, input.expectedEventSequence ?? null, id]
       );
       const saved = result.rows[0];
       if (!saved) throw new Error('consent_event_insert_returned_no_row');
