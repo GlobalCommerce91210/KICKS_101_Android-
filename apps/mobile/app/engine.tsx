@@ -54,7 +54,7 @@ export default function Engine() {
 
   return (
     <Screen>
-      <BrandHeader section="Exfiltration Engine" />
+      <BrandHeader section="Exfiltration Engine" logoTheme="demo" />
       <Card accent>
         <Text style={ui.eyebrow}>COLLECTOR STATUS</Text>
         <Text style={ui.title}>Privacy monitoring</Text>
