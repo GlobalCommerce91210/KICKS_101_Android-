@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "services/api/**"
+      - "apps/mobile/**"
+      - "docs/ZERO_TRUST_COLLECTOR.md"
       - ".github/workflows/kick-011a-persistence.yml"
       - "package.json"
   push:
@@ -50,3 +52,24 @@ jobs:
         run: npm run typecheck --workspace @kicks/api
       - name: Run API unit and PostgreSQL integration tests
         run: npm run test --workspace @kicks/api
+
+  android-debug-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install workspace dependencies
+        run: npm install --ignore-scripts
+      - name: Assemble Android debug build
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleDebug
