@@ -10,6 +10,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.Executors
+import kotlin.random.Random
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -48,22 +49,31 @@ class KicksVpnModule(private val context: ReactApplicationContext) : ReactContex
     verificationExecutor.execute {
       var connection: HttpURLConnection? = null
       try {
-        connection = URL(base.toString().trimEnd('/') + "/v1/collector/eligibility").openConnection() as HttpURLConnection
-        connection.requestMethod = "POST"
-        connection.connectTimeout = 5000
-        connection.readTimeout = 5000
-        connection.doOutput = true
-        connection.setRequestProperty("Authorization", "Bearer $deviceToken")
-        connection.setRequestProperty("Content-Type", "application/json")
         val body = JSONObject().apply {
           put("permissionId", permissionId)
           put("purpose", purpose)
           put("activationRequested", true)
         }.toString()
-        connection.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
-        val statusCode = connection.responseCode
-        val stream = if (statusCode in 200..299) connection.inputStream else connection.errorStream
-        val response = stream?.bufferedReader(StandardCharsets.UTF_8)?.use { it.readText() } ?: "{}"
+        var statusCode = 0
+        var response = "{}"
+        // Bounded retry of the same eligibility request after a retryable service outage.
+        for (attempt in 0..2) {
+          connection = URL(base.toString().trimEnd('/') + "/v1/collector/eligibility").openConnection() as HttpURLConnection
+          connection.requestMethod = "POST"
+          connection.connectTimeout = 5000
+          connection.readTimeout = 5000
+          connection.doOutput = true
+          connection.setRequestProperty("Authorization", "Bearer $deviceToken")
+          connection.setRequestProperty("Content-Type", "application/json")
+          connection.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
+          statusCode = connection.responseCode
+          val stream = if (statusCode in 200..299) connection.inputStream else connection.errorStream
+          response = stream?.bufferedReader(StandardCharsets.UTF_8)?.use { it.readText() } ?: "{}"
+          if (statusCode != 503 || attempt == 2) break
+          connection.disconnect()
+          connection = null
+          Thread.sleep((1000L shl attempt) + Random.nextLong(0, 251))
+        }
         val backendEligible = statusCode == 200 && JSONObject(response).optBoolean("eligible", false)
         val vpnAuthorized = VpnService.prepare(context) == null
         val notificationsGranted = Build.VERSION.SDK_INT < 33 ||
