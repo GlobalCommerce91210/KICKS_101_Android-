@@ -95,6 +95,23 @@ test('PostgreSQL device identity and consent history survive an API restart', { 
     assert.equal(retry.statusCode, 202);
     assert.equal(retry.json().id, originalEventId);
 
+    const changedExpectedSequence = await app.inject({
+      method: 'POST',
+      url: '/v1/consent-events',
+      headers,
+      payload: {
+        permissionId,
+        requestId,
+        expectedEventSequence: 7,
+        action: 'grant',
+        policyVersion: 'privacy-test-1',
+        purposeVersion: 'network-safety-test-1',
+        purpose: 'Detect unexpected data destinations'
+      }
+    });
+    assert.equal(changedExpectedSequence.statusCode, 409);
+    assert.equal(changedExpectedSequence.json().error, 'idempotency_key_reused_with_different_request');
+
     // A globally reused request ID with a different permission/payload must conflict,
     // not surface as a generic database outage even when requests race.
     const conflictingRetry = await app.inject({
