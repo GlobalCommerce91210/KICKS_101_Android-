@@ -50,8 +50,8 @@ export class PostgresConsentRepository implements ConsentRepository {
         await client.query('COMMIT');
         return { ...input, id: row.id, occurredAt: new Date(row.occurred_at).toISOString() };
       }
-      const prior = await client.query<{ subject_id: string; event_sequence: string }>(
-        'SELECT subject_id, event_sequence FROM consent_events WHERE permission_id = $1 ORDER BY event_sequence DESC LIMIT 1',
+      const prior = await client.query<{ subject_id: string }>(
+        'SELECT subject_id FROM consent_events WHERE permission_id = $1 ORDER BY event_sequence DESC LIMIT 1',
         [input.permissionId]
       );
       if (prior.rows[0] && prior.rows[0].subject_id !== input.subjectId) {
@@ -59,7 +59,10 @@ export class PostgresConsentRepository implements ConsentRepository {
         (error as Error & { code?: string }).code = 'CONSENT_OWNER_MISMATCH';
         throw error;
       }
-      const currentSequence = prior.rows[0] ? Number(prior.rows[0].event_sequence) : 0;
+      const countResult = await client.query<{ count: number }>(
+        'SELECT COUNT(*)::int AS count FROM consent_events WHERE permission_id = $1', [input.permissionId]
+      );
+      const currentSequence = countResult.rows[0]?.count ?? 0;
       if (input.expectedEventSequence !== undefined && input.expectedEventSequence !== currentSequence) {
         const error = new Error('stale_consent_decision');
         (error as Error & { code?: string }).code = 'CONSENT_STALE_DECISION';
