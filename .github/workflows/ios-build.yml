@@ -22,8 +22,6 @@ jobs:
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
-      - name: Verify signing credentials are configured
-        run: eas credentials:configure-build -p ios --profile production --non-interactive || true
       - run: eas build -p ios --profile production --non-interactive --wait
       - if: ${{ inputs.submit }}
         run: eas submit -p ios --profile production --latest --non-interactive
