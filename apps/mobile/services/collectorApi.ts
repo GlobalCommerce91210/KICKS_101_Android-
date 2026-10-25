@@ -1,4 +1,4 @@
-import { NativeModules, Platform } from 'react-native';
+import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
 
 export type CollectorState =
   | 'UNAVAILABLE'
@@ -54,6 +54,18 @@ export const collectorApi = {
   },
   async requestAuthorization() {
     if (Platform.OS !== 'android' || !native) throw new Error('Android VPN collector unavailable on this platform.');
+    if (Number(Platform.Version) >= 33) {
+      const permission = PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS;
+      const result = await PermissionsAndroid.request(permission, {
+        title: "KICK'S monitoring notification",
+        message: 'If monitoring is explicitly enabled in a future verified build, Android must show a persistent notification and visible stop control.',
+        buttonPositive: 'Continue',
+        buttonNegative: 'Not now'
+      });
+      if (result !== PermissionsAndroid.RESULTS.GRANTED) {
+        throw new Error('Notification permission was not granted. Monitoring remains OFF.');
+      }
+    }
     return native.requestAuthorization();
   },
   async start() {
