@@ -114,7 +114,7 @@ export class CollectorAuthorizationService {
         !evidence.proofChain || evidence.proofChain !== evidence.requiredChain) return this.block('BLOCKED_VERIFICATION_FAILED', 'independent_chain_proof_or_finality_missing');
     if (evidence.osPermissionEvidence !== 'SERVER_VERIFIED') return this.block('BLOCKED_OS_PERMISSION', 'server_verified_os_permission_evidence_missing');
     if (evidence.safetyPolicy !== 'PASS') return this.block('BLOCKED_POLICY', 'collector_safety_policy_not_passed');
-    if (!Number.isSafeInteger(evidence.revocationEpoch) || evidence.revocationEpoch < 0) return this.block('BLOCKED_SERVICE_UNAVAILABLE', 'revocation_epoch_unavailable');
+    if (!Number.isSafeInteger(evidence.revocationEpoch) || evidence.revocationEpoch < 0 || !Number.isFinite(evidence.expiresAt)) return this.block('BLOCKED_SERVICE_UNAVAILABLE', 'revocation_epoch_or_expiry_unavailable');
 
     const expiresAt = Math.min(this.now() + this.ttlMs, evidence.expiresAt);
     if (expiresAt <= this.now()) return this.block('BLOCKED_REVOKED', 'authorization_expired');
@@ -134,6 +134,7 @@ export class CollectorAuthorizationService {
     if (JSON.stringify(record.request) !== JSON.stringify(request)) return this.block('BLOCKED_POLICY', 'authorization_capability_scope_mismatch');
     // Re-read revocation, consent, proof, permissions and policy for every protected operation.
     const current = await this.authorizeCollector(request, transaction);
+    if (current.authorizationId) this.issued.delete(hash(current.authorizationId));
     if (!current.eligible || current.decisionVersion !== record.decisionVersion) {
       this.issued.delete(hash(token));
       return current.eligible ? this.block('BLOCKED_REVOKED', 'consent_version_changed') : current;
