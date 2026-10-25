@@ -418,5 +418,55 @@ test('branding endpoints return official brand and mascot specification', async 
   await app.close();
 });
 
+test('memory consent writes enforce sequence-aware idempotency and serialize concurrent decisions', async () => {
+  const { app, token } = await setup();
+  const permissionId = randomUUID();
+  const requestId = randomUUID();
+  const headers = { authorization: 'Bearer ' + token };
+  const decision = (id: string, expectedEventSequence: number) => app.inject({
+    method: 'POST',
+    url: '/v1/consent-events',
+    headers,
+    payload: {
+      permissionId,
+      requestId: id,
+      expectedEventSequence,
+      action: 'grant',
+      policyVersion: 'privacy-1',
+      purposeVersion: 'network-safety-1',
+      purpose: 'Detect unexpected data destinations'
+    }
+  });
 
+  try {
+    const first = await decision(requestId, 0);
+    assert.equal(first.statusCode, 202);
+    assert.equal(first.json().eventSequence, 1);
+    assert.equal((await decision(requestId, 0)).json().idempotentReplay, true);
+    const changedRetry = await decision(requestId, 1);
+    assert.equal(changedRetry.statusCode, 409);
+    assert.equal(changedRetry.json().error, 'idempotency_key_reused_with_different_request');
 
+    const concurrent = await Promise.all([
+      decision(randomUUID(), 1),
+      decision(randomUUID(), 1)
+    ]);
+    assert.deepEqual(concurrent.map(response => response.statusCode).sort(), [202, 409]);
+    assert.equal(concurrent.find(response => response.statusCode === 409)?.json().error, 'stale_consent_decision');
+  } finally {
+    await app.close();
+  }
+});
+
+test('API applies a request rate limit', async () => {
+  const app = buildServer();
+  try {
+    let response;
+    for (let request = 0; request < 61; request += 1) {
+      response = await app.inject({ method: 'GET', url: '/health' });
+    }
+    assert.equal(response?.statusCode, 429);
+  } finally {
+    await app.close();
+  }
+});

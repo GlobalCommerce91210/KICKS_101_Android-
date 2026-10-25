@@ -19,7 +19,7 @@ The service must continue to say `metadata-only` and `staging` until persistent 
 
 The Android app exposes an explicit collector status contract: `UNAVAILABLE`, `DISCONNECTED`, `CONNECTING`, `VERIFYING`, `VERIFIED`, and `VERIFICATION_FAILED`. A UI state is not proof of collection. `VERIFIED` is permitted only after native forwarding health and backend/device-bound verification both succeed.
 
-The current 0.2.6 implementation intentionally returns `UNAVAILABLE` while `COLLECTOR_ENABLED=false`. The VPN service must not establish a TUN interface until a complete forwarding implementation exists; silently routing device traffic into an incomplete tunnel would break connectivity and create a privacy risk. This is a fail-closed release gate, not a claim that the collector is complete.
+The current 0.2.6 implementation intentionally returns `UNAVAILABLE`; the native forwarding path is not implemented, and enabling the build flag alone cannot mark it available. The VPN service must not establish a TUN interface until a complete forwarding implementation exists; silently routing device traffic into an incomplete tunnel would break connectivity and create a privacy risk. This is a fail-closed release gate, not a claim that the collector is complete.
 
 Before enabling collection, the implementation must:
 - confirm the device token against the persistent backend and verify the latest purpose-specific consent event;
@@ -28,5 +28,6 @@ Before enabling collection, the implementation must:
 - report status transitions from native service health, not a UI toggle;
 - stop collection on consent revocation, authentication loss, permission loss, service failure, or backend verification failure;
 - never label demo observations as live network traffic.
+- implement and independently verify the iOS permission/collector path; no iOS collector verification is included in this release.
 
 The merged Android manifest should contain only permissions justified by active features. The 0.2.6 manifest removes broad external-storage read/write permissions and the system-overlay permission because the collector/UI does not need them. Re-add a permission only with a documented feature requirement and reviewed user-facing disclosure.

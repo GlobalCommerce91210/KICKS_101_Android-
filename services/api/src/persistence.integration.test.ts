@@ -151,6 +151,68 @@ test('PostgreSQL device identity and consent history survive an API restart', { 
     assert.equal(staleDecision.statusCode, 409);
     assert.equal(staleDecision.json().error, 'stale_consent_decision');
 
+    const concurrentDecisions = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: '/v1/consent-events',
+        headers,
+        payload: {
+          permissionId,
+          requestId: randomUUID(),
+          expectedEventSequence: 1,
+          action: 'grant',
+          policyVersion: 'privacy-test-1',
+          purposeVersion: 'network-safety-test-1',
+          purpose: 'Detect unexpected data destinations'
+        }
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/v1/consent-events',
+        headers,
+        payload: {
+          permissionId,
+          requestId: randomUUID(),
+          expectedEventSequence: 1,
+          action: 'grant',
+          policyVersion: 'privacy-test-1',
+          purposeVersion: 'network-safety-test-1',
+          purpose: 'Detect unexpected data destinations'
+        }
+      })
+    ]);
+    assert.deepEqual(concurrentDecisions.map(response => response.statusCode).sort(), [202, 409]);
+    assert.equal(concurrentDecisions.find(response => response.statusCode === 409)?.json().error, 'stale_consent_decision');
+
+    const deniedPermissionId = randomUUID();
+    const deniedDecision = await app.inject({
+      method: 'POST',
+      url: '/v1/consent-events',
+      headers,
+      payload: {
+        permissionId: deniedPermissionId,
+        requestId: randomUUID(),
+        expectedEventSequence: 0,
+        action: 'deny',
+        policyVersion: 'privacy-test-1',
+        purposeVersion: 'network-safety-test-1',
+        purpose: 'Detect unexpected data destinations'
+      }
+    });
+    assert.equal(deniedDecision.statusCode, 202);
+    assert.equal(deniedDecision.json().eventSequence, 1);
+    const deniedEligibility = await app.inject({
+      method: 'POST',
+      url: '/v1/collector/eligibility',
+      headers,
+      payload: {
+        permissionId: deniedPermissionId,
+        purpose: 'Detect unexpected data destinations',
+        activationRequested: true
+      }
+    });
+    assert.equal(deniedEligibility.statusCode, 403);
+
     const acceptedBatchId = randomUUID();
     const acceptedEventId = randomUUID();
     const acceptedBatch = await app.inject({
@@ -210,7 +272,7 @@ test('PostgreSQL device identity and consent history survive an API restart', { 
       payload: {
         permissionId,
         requestId: randomUUID(),
-        expectedEventSequence: 1,
+        expectedEventSequence: 2,
         action: 'revoke',
         policyVersion: 'privacy-test-1',
         purposeVersion: 'network-safety-test-1',
@@ -219,15 +281,17 @@ test('PostgreSQL device identity and consent history survive an API restart', { 
     });
     assert.equal(revoke.statusCode, 202);
 
+    const revokedBatchId = randomUUID();
+    const revokedEventId = randomUUID();
     const protectedBatch = await app.inject({
       method: 'POST',
       url: '/v1/metadata-batches',
       headers,
       payload: {
-        batchId: randomUUID(),
+        batchId: revokedBatchId,
         schemaVersion: '2026-08-01',
         observations: [{
-          eventId: randomUUID(),
+          eventId: revokedEventId,
           occurredAt: new Date().toISOString(),
           sourceApp: 'com.example.test',
           attribution: 'verified',
@@ -241,6 +305,8 @@ test('PostgreSQL device identity and consent history survive an API restart', { 
       }
     });
     assert.equal(protectedBatch.statusCode, 403);
+    assert.equal((await pool!.query('SELECT id FROM metadata_batches WHERE id = $1', [revokedBatchId])).rows.length, 0);
+    assert.equal((await pool!.query('SELECT id FROM metadata_observations WHERE id = $1', [revokedEventId])).rows.length, 0);
 
     const finalHistory = await app.inject({
       method: 'GET',
@@ -249,8 +315,15 @@ test('PostgreSQL device identity and consent history survive an API restart', { 
     });
     assert.deepEqual(finalHistory.json().events.map((event: { action: string }) => event.action), ['grant', 'revoke']);
 
-    // Confirm the bearer token still resolves to the same durable device after restart.
-    assert.equal(deviceId.length > 0, true);
+    const deviceRevocation = await app.inject({ method: 'POST', url: '/v1/devices/revoke', headers });
+    assert.equal(deviceRevocation.statusCode, 200);
+    assert.equal(deviceRevocation.json().deviceId, deviceId);
+    const rejectedAfterDeviceRevocation = await app.inject({
+      method: 'GET',
+      url: `/v1/consent-events/${permissionId}`,
+      headers
+    });
+    assert.equal(rejectedAfterDeviceRevocation.statusCode, 401);
   } finally {
     await app?.close().catch(() => undefined);
     await pool?.end().catch(() => undefined);
@@ -286,6 +359,7 @@ test('consent migration preserves legacy rows and assigns non-authorizing purpos
     );
     const migration = await readFile(new URL('../db/migrations/20261025_consent_purpose.sql', import.meta.url), 'utf8');
     await pool.query(migration);
+    await pool.query(migration);
     const result = await pool.query(
       'SELECT id, purpose, request_id, event_sequence FROM consent_events WHERE id = $1',
       [id]
@@ -294,6 +368,11 @@ test('consent migration preserves legacy rows and assigns non-authorizing purpos
     assert.equal(result.rows[0].purpose, 'legacy-unavailable');
     assert.equal(result.rows[0].request_id, id);
     assert.ok(Number(result.rows[0].event_sequence) > 0);
+    const stream = await pool.query(
+      'SELECT last_sequence FROM consent_permission_sequences WHERE permission_id = (SELECT permission_id FROM consent_events WHERE id = $1)',
+      [id]
+    );
+    assert.equal(Number(stream.rows[0]?.last_sequence), 1);
   } finally {
     await pool?.end().catch(() => undefined);
     await adminPool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);

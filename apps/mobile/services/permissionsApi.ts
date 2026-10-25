@@ -51,7 +51,7 @@ export interface ConsentLogEntry {
 
 function getBaseUrl(): string {
   const configured = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
-  if (configured) return configured.replace(/\\/+$/, '');
+  if (configured) return configured.replace(/\/+$/, '');
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
     return window.location.origin;
   }

@@ -3,7 +3,7 @@
 ## Before enabling the API
 
 1. Take a database backup and confirm the target environment.
-2. For a new database, apply `db/schema.sql` first. For an existing database, run `npm run migrate --workspace @kicks/api` with `DATABASE_URL` explicitly set to the intended non-production database first. This uses a transaction and a PostgreSQL advisory lock to apply `db/migrations/20261025_consent_purpose.sql`. The migration adds purpose, event ordering, expected sequence, and idempotency fields. Existing consent events are marked `legacy-unavailable` when purpose was not recorded; those rows must not authorize purpose-specific ingestion. The migration command does not run automatically at API startup.
+2. For a new database, apply `db/schema.sql` first. For an existing database, run `npm run migrate --workspace @kicks/api` with `DATABASE_URL` explicitly set to the intended non-production database first. This uses a transaction and a PostgreSQL advisory lock to apply `db/migrations/20261025_consent_purpose.sql`. The migration adds purpose, per-permission event ordering, a durable stream-head table for expected sequences, and idempotency fields. Existing consent events are marked `legacy-unavailable` when purpose was not recorded; those rows must not authorize purpose-specific ingestion. The migration command does not run automatically at API startup.
 3. Configure `DATABASE_URL` as a secret in the API runtime. The API refuses to start without it.
 4. Restart the API and verify `/health`, device enrollment, consent grant, consent history, and revoke behavior using a non-production test subject.
 

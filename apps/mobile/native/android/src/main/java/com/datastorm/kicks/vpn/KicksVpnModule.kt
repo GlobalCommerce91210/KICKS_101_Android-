@@ -19,6 +19,7 @@ import com.datastorm.kicks.BuildConfig
 
 class KicksVpnModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
   private val verificationExecutor = Executors.newSingleThreadExecutor()
+  private val collectorEnabled: Boolean get() = BuildConfig.COLLECTOR_ENABLED && KicksVpnService.FORWARDING_IMPLEMENTED
   @Volatile private var backendEligibilityVerified = false
   override fun getName() = "KicksVpn"
 
@@ -85,13 +86,13 @@ class KicksVpnModule(private val context: ReactApplicationContext) : ReactContex
         val vpnAuthorized = VpnService.prepare(context) == null
         val notificationsGranted = Build.VERSION.SDK_INT < 33 ||
           context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-        val eligible = backendEligible && vpnAuthorized && notificationsGranted && BuildConfig.COLLECTOR_ENABLED
+        val eligible = backendEligible && vpnAuthorized && notificationsGranted && collectorEnabled
         backendEligibilityVerified = eligible
         val reason = when {
           !backendEligible -> "backend_consent_or_device_verification_failed"
           !vpnAuthorized -> "vpn_authorization_required"
           !notificationsGranted -> "notification_permission_required"
-          !BuildConfig.COLLECTOR_ENABLED -> "native_collector_unavailable"
+          !collectorEnabled -> "native_collector_unavailable"
           else -> "eligible"
         }
         promise.resolve(com.facebook.react.bridge.Arguments.createMap().apply {
@@ -99,7 +100,7 @@ class KicksVpnModule(private val context: ReactApplicationContext) : ReactContex
           putBoolean("backendEligible", backendEligible)
           putBoolean("vpnAuthorized", vpnAuthorized)
           putBoolean("notificationPermissionGranted", notificationsGranted)
-          putBoolean("collectorEnabled", BuildConfig.COLLECTOR_ENABLED)
+          putBoolean("collectorEnabled", collectorEnabled)
           putString("reason", reason)
         })
       } catch (_: Exception) {
@@ -119,9 +120,9 @@ class KicksVpnModule(private val context: ReactApplicationContext) : ReactContex
     val vpnAuthorized = VpnService.prepare(context) == null
     val notificationPermission = Build.VERSION.SDK_INT < 33 ||
       context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-    val collectorEnabled = BuildConfig.COLLECTOR_ENABLED
+    val isCollectorEnabled = collectorEnabled
     val state = when {
-      !collectorEnabled -> "UNAVAILABLE"
+      !isCollectorEnabled -> "UNAVAILABLE"
       !vpnAuthorized -> "DISCONNECTED"
       !notificationPermission -> "DISCONNECTED"
       else -> "DISCONNECTED" // Never report VERIFIED without a running native forwarding path and backend proof.
@@ -130,7 +131,7 @@ class KicksVpnModule(private val context: ReactApplicationContext) : ReactContex
       putString("state", state)
       putBoolean("vpnAuthorized", vpnAuthorized)
       putBoolean("notificationPermissionGranted", notificationPermission)
-      putBoolean("collectorEnabled", collectorEnabled)
+      putBoolean("collectorEnabled", isCollectorEnabled)
       putBoolean("monitoringDefaultOn", false)
       putString("verification", "not_verified")
     }
@@ -163,7 +164,7 @@ class KicksVpnModule(private val context: ReactApplicationContext) : ReactContex
       promise.reject("NOTIFICATION_PERMISSION_REQUIRED", "Notification permission is required so monitoring cannot run invisibly.")
       return
     }
-    if (!BuildConfig.COLLECTOR_ENABLED) {
+    if (!collectorEnabled) {
       promise.reject("COLLECTOR_NOT_CONFIGURED", "The beta collector is disabled until a production endpoint and forwarding path are configured.")
       return
     }

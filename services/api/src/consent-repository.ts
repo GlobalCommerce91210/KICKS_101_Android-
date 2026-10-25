@@ -63,22 +63,33 @@ export class PostgresConsentRepository implements ConsentRepository {
         (error as Error & { code?: string }).code = 'CONSENT_OWNER_MISMATCH';
         throw error;
       }
-      const countResult = await client.query<{ count: number }>(
-        'SELECT COUNT(*)::int AS count FROM consent_events WHERE permission_id = $1', [input.permissionId]
+      const sequenceResult = await client.query<{ last_sequence: number | string }>(
+        'SELECT last_sequence FROM consent_permission_sequences WHERE permission_id = $1 FOR UPDATE',
+        [input.permissionId]
       );
-      const currentSequence = countResult.rows[0]?.count ?? 0;
+      const currentSequence = Number(sequenceResult.rows[0]?.last_sequence ?? 0);
       if (input.expectedEventSequence !== undefined && input.expectedEventSequence !== currentSequence) {
         const error = new Error('stale_consent_decision');
         (error as Error & { code?: string }).code = 'CONSENT_STALE_DECISION';
         throw error;
       }
+      const nextSequence = await client.query<{ last_sequence: number | string }>(
+        `INSERT INTO consent_permission_sequences (permission_id, last_sequence)
+         VALUES ($1, 1)
+         ON CONFLICT (permission_id) DO UPDATE
+         SET last_sequence = consent_permission_sequences.last_sequence + 1
+         RETURNING last_sequence`,
+        [input.permissionId]
+      );
+      const eventSequence = Number(nextSequence.rows[0]?.last_sequence);
+      if (!Number.isSafeInteger(eventSequence)) throw new Error('consent_event_sequence_unavailable');
       const id = randomUUID();
       const result = await client.query<{ occurred_at: Date | string; event_sequence: number | string }>(
         `INSERT INTO consent_events
-          (id, request_id, subject_id, permission_id, action, policy_version, purpose_version, purpose, expected_event_sequence, correlation_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          (id, request_id, subject_id, permission_id, event_sequence, action, policy_version, purpose_version, purpose, expected_event_sequence, correlation_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING occurred_at, event_sequence`,
-        [id, input.requestId, input.subjectId, input.permissionId, input.action, input.policyVersion, input.purposeVersion, input.purpose, input.expectedEventSequence ?? null, id]
+        [id, input.requestId, input.subjectId, input.permissionId, eventSequence, input.action, input.policyVersion, input.purposeVersion, input.purpose, input.expectedEventSequence ?? null, id]
       );
       const saved = result.rows[0];
       if (!saved) throw new Error('consent_event_insert_returned_no_row');

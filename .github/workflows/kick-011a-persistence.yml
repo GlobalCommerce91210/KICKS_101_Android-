@@ -1,6 +1,9 @@
 name: KICK-011A Persistence Gates
 
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -32,11 +35,13 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Install workspace dependencies
-        run: npm install --ignore-scripts
+        run: npm install --no-audit --no-fund
       - name: Typecheck API
         run: npm run typecheck --workspace @kicks/api
+      - name: Build web assets required by API route tests
+        run: npm run build:web --workspace @kicks/mobile
       - name: Run API unit and PostgreSQL integration tests
         run: npm run test --workspace @kicks/api
 
@@ -49,14 +54,17 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
       - name: Install workspace dependencies
-        run: npm install --ignore-scripts
+        run: npm install --no-audit --no-fund
+      - name: Generate Android project
+        working-directory: apps/mobile
+        run: npx expo prebuild --platform android --no-install
       - name: Assemble Android debug build
         working-directory: apps/mobile/android
         run: ./gradlew assembleDebug

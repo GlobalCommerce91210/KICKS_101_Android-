@@ -3,7 +3,8 @@ import type { Pool } from 'pg';
 export type DeviceRecord = { id: string; subjectId: string; tokenHash: string; revoked: boolean };
 export interface DeviceRepository {
   create(device: DeviceRecord, environment: 'staging' | 'production'): Promise<void>;
-  findActiveByTokenHash(tokenHash: string): Promise<DeviceRecord | null>;\n  revokeByTokenHash(tokenHash: string): Promise<boolean>;
+  findActiveByTokenHash(tokenHash: string): Promise<DeviceRecord | null>;
+  revokeByTokenHash(tokenHash: string): Promise<boolean>;
 }
 
 export class PostgresDeviceRepository implements DeviceRepository {
