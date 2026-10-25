@@ -16,7 +16,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.datastorm.kicks.BuildConfig
 
-class KicksVpnModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {\n  private val verificationExecutor = Executors.newSingleThreadExecutor()
+class KicksVpnModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {\n  private val verificationExecutor = Executors.newSingleThreadExecutor()\n  @Volatile private var backendEligibilityVerified = false
   override fun getName() = "KicksVpn"
 
   @ReactMethod
@@ -65,7 +65,7 @@ class KicksVpnModule(private val context: ReactApplicationContext) : ReactContex
         val vpnAuthorized = VpnService.prepare(context) == null
         val notificationsGranted = Build.VERSION.SDK_INT < 33 ||
           context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-        val eligible = backendEligible && vpnAuthorized && notificationsGranted && BuildConfig.COLLECTOR_ENABLED
+        val eligible = backendEligible && vpnAuthorized && notificationsGranted && BuildConfig.COLLECTOR_ENABLED\n        backendEligibilityVerified = eligible
         val reason = when {
           !backendEligible -> "backend_consent_or_device_verification_failed"
           !vpnAuthorized -> "vpn_authorization_required"
