@@ -45,10 +45,14 @@ export function buildServer(options:{store?:Store;adminSecret?:string;intelligen
   const authenticate=(authorization?:string)=>{const[scheme,token]=authorization?.split(' ')??[];if(scheme!=='Bearer'||!token)return null;const tokenHash=hash(token);return[...store.devices.values()].find(d=>!d.revoked&&equal(d.tokenHash,tokenHash))??null};
   app.post('/v1/staging/devices',async(q,r)=>{if(!adminSecret||!equal(hash(String(q.headers['x-admin-secret']??'')),hash(adminSecret)))return r.code(403).send({error:'forbidden'});const parsed=z.object({subjectId:z.string().uuid()}).strict().safeParse(q.body);if(!parsed.success)return r.code(400).send({error:'invalid_request'});const token=randomBytes(32).toString('base64url'),device:Device={id:randomUUID(),subjectId:parsed.data.subjectId,tokenHash:hash(token),revoked:false};store.devices.set(device.id,device);return r.code(201).send({deviceId:device.id,token,tokenType:'Bearer'})});
   app.post('/v1/consent-events',async(q,r)=>{const device=authenticate(q.headers.authorization);if(!device)return r.code(401).send({error:'unauthorized'});const parsed=decision.safeParse(q.body);if(!parsed.success)return r.code(400).send({error:'invalid_request',issues:parsed.error.issues});const consent:Consent={id:parsed.data.permissionId,subjectId:device.subjectId,purpose:parsed.data.purpose,policyVersion:parsed.data.policyVersion,purposeVersion:parsed.data.purposeVersion,state:parsed.data.action==='grant'?'granted':'revoked'};store.consents.set(consent.id,consent);return r.code(202).send({id:randomUUID(),occurredAt:new Date().toISOString(),...parsed.data,status:'accepted'})});
-  app.post('/v1/metadata-batches',async(q,r)=>{const device=authenticate(q.headers.authorization);if(!device)return r.code(401).send({error:'unauthorized'});const parsed=batch.safeParse(q.body);if(!parsed.success)return r.code(400).send({error:'invalid_or_non_minimized_metadata',issues:parsed.error.issues});if(store.batches.has(parsed.data.batchId))return r.code(409).send({error:'replay_detected'});for(const item of parsed.data.observations){const consent=store.consents.get(item.consentId);if(!consent||consent.subjectId!==device.subjectId||consent.state!=='granted'||consent.purpose!==item.consentPurpose)return r.code(403).send({error:'active_purpose_consent_required',eventId:item.eventId})}store.batches.add(parsed.data.batchId);store.observations.push(...parsed.data.observations);return r.code(202).send({batchId:parsed.data.batchId,accepted:parsed.data.observations.length})});
+  app.post('/v1/metadata-batches',async(q,r)=>{const device=authenticate(q.headers.authorization);if(!device)return r.code(401).send({error:'unauthorized'});const parsed=batch.safeParse(q.body);if(!parsed.success)return r.code(400).send({error:'invalid_or_non_minimized_metadata',issues:parsed.error.issues});if(store.batches.has(parsed.data.batchId))return r.code(409).send({error:'replay_detected'});// KICK-011C: fail closed until a durable current-decision ledger and independently verified receipt are wired into the ingestion transaction.\n    // In-memory grants and client-supplied consent IDs are never authorization evidence.\n    return r.code(403).send({error:'verified_collector_authorization_required'});store.batches.add(parsed.data.batchId);store.observations.push(...parsed.data.observations);return r.code(202).send({batchId:parsed.data.batchId,accepted:parsed.data.observations.length})});
 
   // Intelligence & Value Engine Endpoints
   app.post('/v1/intelligence/events', async (req, reply) => {
+    // KICK-011C: this route previously bypassed device and consent authorization.
+    // Keep disabled until the shared verified-consent authorization service protects all ingestion paths.
+    return reply.code(403).send({ error: 'verified_collector_authorization_required' });
+    /*
     const raw = req.body as Partial<TelemetryEvent>;
     if (!raw || !raw.event_id || !raw.timestamp || !raw.app_id || !raw.device_id || !raw.network) {
       return reply.code(400).send({ error: 'invalid_telemetry_event' });
@@ -58,6 +62,7 @@ export function buildServer(options:{store?:Store;adminSecret?:string;intelligen
     return reply.code(200).send(view);
   });
 
+    */
   app.get('/v1/intelligence/events/:event_id', async (req, reply) => {
     const { event_id } = req.params as { event_id: string };
     const view = engine.getEvent(event_id);
