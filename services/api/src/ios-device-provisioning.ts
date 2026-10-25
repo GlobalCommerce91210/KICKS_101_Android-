@@ -41,10 +41,6 @@ export class MemoryIosDeviceProvisioner implements IosDeviceProvisioner {
 export class PostgresIosDeviceProvisioner implements IosDeviceProvisioner {
   constructor(private readonly pool:Pool){}
   async provision(input:IosProvisionInput):Promise<IosProvisionResult>{
-    await this.pool.query(`CREATE TABLE IF NOT EXISTS ios_device_provisioning (
-      request_id UUID PRIMARY KEY,account_subject_id TEXT NOT NULL REFERENCES consumer_accounts(subject_id),
-      device_id UUID NOT NULL UNIQUE REFERENCES devices(id),public_key TEXT NOT NULL UNIQUE,token_hash TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
     const client=await this.pool.connect();
     try{
       await client.query('BEGIN');
