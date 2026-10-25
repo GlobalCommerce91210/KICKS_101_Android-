@@ -17,7 +17,7 @@ const consentInput = {
 };
 const deviceRepository = (overrides: Partial<DeviceRepository> = {}): DeviceRepository => ({
   create: async () => undefined,
-  findActiveByTokenHash: async tokenHash => ({
+  revokeByTokenHash: async () => true,\n  findActiveByTokenHash: async tokenHash => ({
     id: randomUUID(), subjectId, tokenHash, revoked: false
   }),
   ...overrides
@@ -179,6 +179,34 @@ test('collector eligibility requires explicit activation and exact current purpo
     assert.equal(allowed.statusCode, 200);
     assert.equal(allowed.json().eligible, true);
     assert.equal(allowed.json().monitoringDefaultOn, false);
+  } finally {
+    await app.close();
+  }
+});
+
+
+test('device revocation is persisted and prevents further authentication', async () => {
+  let revoked = false;
+  const repo = deviceRepository({
+    findActiveByTokenHash: async tokenHash => revoked ? null : ({
+      id: randomUUID(), subjectId, tokenHash, revoked: false
+    }),
+    revokeByTokenHash: async () => { revoked = true; return true; }
+  });
+  const app = buildServer({ adminSecret: 'failure-test-secret', deviceRepository: repo });
+  try {
+    const headers = await enroll(app);
+    const before = await app.inject({
+      method: 'GET', url: `/v1/consent-events/${permissionId}`, headers
+    });
+    assert.equal(before.statusCode, 200);
+    const revoke = await app.inject({ method: 'POST', url: '/v1/devices/revoke', headers });
+    assert.equal(revoke.statusCode, 200);
+    assert.equal(revoke.json().revoked, true);
+    const after = await app.inject({
+      method: 'GET', url: `/v1/consent-events/${permissionId}`, headers
+    });
+    assert.equal(after.statusCode, 401);
   } finally {
     await app.close();
   }
