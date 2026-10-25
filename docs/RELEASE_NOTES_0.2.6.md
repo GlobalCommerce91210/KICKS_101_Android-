@@ -18,3 +18,10 @@ The Android native forwarding collector is **not yet implemented end to end**. T
 ## Verification status
 
 Automated tests, migration application, Android build, API restart recovery, and physical-device collector acceptance are intentionally pending until the implementation sequence is complete. Do not merge, distribute, or enable monitoring based solely on these source changes.
+
+- Added a mobile consent API helper that retries transient persistence failures using the same request ID and payload; it refuses non-HTTPS endpoints.
+- Native permissions API configuration no longer silently targets `localhost` on a physical device.
+
+## Remaining integration gaps before calling consent end-to-end
+
+The existing Permissions screen still uses the legacy permissions endpoints and demo user ID. It is not yet fully wired to the new durable consent ledger because the app-side authenticated device enrollment/session flow must first supply a securely stored device token and real UUID-backed permission identity. Do not treat a change in the legacy Permissions screen as proof that the PostgreSQL consent event was persisted.
