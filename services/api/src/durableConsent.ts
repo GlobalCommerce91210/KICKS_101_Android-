@@ -54,7 +54,7 @@ export class DurableConsentService {
       if (!device.rowCount || device.rows[0].revoked_at || device.rows[0].subject_id !== input.userId) throw new Error('DEVICE_OWNERSHIP_OR_ENROLLMENT_FAILED');
 
       const prior = await client.query(
-        'SELECT d.decision_id,d.receipt_id,d.decision,d.decision_version,r.verification_status FROM consent_decisions d JOIN consent_receipts r USING(receipt_id) WHERE d.authenticated_actor_id=$1 AND d.idempotency_key=$2',
+        'SELECT d.decision_id,d.receipt_id,d.decision,d.decision_version,d.request_fingerprint,r.verification_status FROM consent_decisions d JOIN consent_receipts r USING(receipt_id) WHERE d.authenticated_actor_id=$1 AND d.idempotency_key=$2',
         [input.actorId, input.idempotencyKey]);
       if (prior.rowCount) {
         await client.query('COMMIT');
