@@ -12,7 +12,7 @@ export type ConsentDecision = {
   purposeVersion: string;
   purpose: string;
 };
-export type ConsentEvent = ConsentDecision & { id: string; occurredAt: string };
+export type ConsentEvent = ConsentDecision & { id: string; occurredAt: string; eventSequence?: number };
 export type CurrentConsent = {
   id: string;
   subjectId: string;
@@ -40,8 +40,8 @@ export class PostgresConsentRepository implements ConsentRepository {
       for (const lockKey of lockKeys) {
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [lockKey]);
       }
-      const duplicate = await client.query<{ id: string; subject_id: string; permission_id: string; action: ConsentAction; policy_version: string; purpose_version: string; purpose: string; expected_event_sequence: number | null; occurred_at: Date | string }>(
-        'SELECT id, subject_id, permission_id, action, policy_version, purpose_version, purpose, expected_event_sequence, occurred_at FROM consent_events WHERE request_id = $1',
+      const duplicate = await client.query<{ id: string; subject_id: string; permission_id: string; action: ConsentAction; policy_version: string; purpose_version: string; purpose: string; expected_event_sequence: number | null; event_sequence: number | string; occurred_at: Date | string }>(
+        'SELECT id, subject_id, permission_id, action, policy_version, purpose_version, purpose, expected_event_sequence, event_sequence, occurred_at FROM consent_events WHERE request_id = $1',
         [input.requestId]
       );
       if (duplicate.rows[0]) {
@@ -52,7 +52,7 @@ export class PostgresConsentRepository implements ConsentRepository {
           throw error;
         }
         await client.query('COMMIT');
-        return { ...input, id: row.id, occurredAt: new Date(row.occurred_at).toISOString() };
+        return { ...input, id: row.id, eventSequence: Number(row.event_sequence), occurredAt: new Date(row.occurred_at).toISOString() };
       }
       const prior = await client.query<{ subject_id: string }>(
         'SELECT subject_id FROM consent_events WHERE permission_id = $1 ORDER BY event_sequence DESC LIMIT 1',
@@ -73,17 +73,17 @@ export class PostgresConsentRepository implements ConsentRepository {
         throw error;
       }
       const id = randomUUID();
-      const result = await client.query<{ occurred_at: Date | string }>(
+      const result = await client.query<{ occurred_at: Date | string; event_sequence: number | string }>(
         `INSERT INTO consent_events
           (id, request_id, subject_id, permission_id, action, policy_version, purpose_version, purpose, expected_event_sequence, correlation_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         RETURNING occurred_at`,
+         RETURNING occurred_at, event_sequence`,
         [id, input.requestId, input.subjectId, input.permissionId, input.action, input.policyVersion, input.purposeVersion, input.purpose, input.expectedEventSequence ?? null, id]
       );
       const saved = result.rows[0];
       if (!saved) throw new Error('consent_event_insert_returned_no_row');
       await client.query('COMMIT');
-      return { ...input, id, occurredAt: new Date(saved.occurred_at).toISOString() };
+      return { ...input, id, eventSequence: Number(saved.event_sequence), occurredAt: new Date(saved.occurred_at).toISOString() };
     } catch (error) {
       await client.query('ROLLBACK').catch(() => undefined);
       throw error;
@@ -113,15 +113,15 @@ export class PostgresConsentRepository implements ConsentRepository {
   async getHistory(permissionId: string, subjectId: string): Promise<ConsentEvent[]> {
     const result = await this.pool.query<{
       id: string; request_id: string; subject_id: string; action: ConsentAction; policy_version: string;
-      purpose_version: string; purpose: string; occurred_at: Date | string;
+      purpose_version: string; purpose: string; expected_event_sequence: number | null; event_sequence: number | string; occurred_at: Date | string;
     }>(
-      'SELECT id, request_id, subject_id, action, policy_version, purpose_version, purpose, occurred_at FROM consent_events WHERE permission_id = $1 AND subject_id = $2 ORDER BY event_sequence ASC',
+      'SELECT id, request_id, subject_id, action, policy_version, purpose_version, purpose, expected_event_sequence, event_sequence, occurred_at FROM consent_events WHERE permission_id = $1 AND subject_id = $2 ORDER BY event_sequence ASC',
       [permissionId, subjectId]
     );
     return result.rows.map(row => ({
       id: row.id, permissionId, requestId: row.request_id, subjectId: row.subject_id, action: row.action,
       policyVersion: row.policy_version, purposeVersion: row.purpose_version,
-      purpose: row.purpose, occurredAt: new Date(row.occurred_at).toISOString()
+      purpose: row.purpose, expectedEventSequence: row.expected_event_sequence === null ? undefined : Number(row.expected_event_sequence), eventSequence: Number(row.event_sequence), occurredAt: new Date(row.occurred_at).toISOString()
     }));
   }
 }
