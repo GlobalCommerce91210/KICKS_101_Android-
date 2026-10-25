@@ -3,3 +3,6 @@
 ALTER TABLE consent_events ADD COLUMN IF NOT EXISTS purpose text;
 UPDATE consent_events SET purpose = 'legacy-unavailable' WHERE purpose IS NULL;
 ALTER TABLE consent_events ALTER COLUMN purpose SET NOT NULL;
+
+ALTER TABLE consent_events ADD COLUMN IF NOT EXISTS event_sequence bigserial;
+CREATE UNIQUE INDEX IF NOT EXISTS consent_events_event_sequence_uq ON consent_events(event_sequence);
