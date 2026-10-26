@@ -93,11 +93,29 @@ cross-account rejection, logout/revocation/expiry, network-change resume, shutdo
 11. Force-stop the app and reboot: collector stays off until explicitly activated again.
 12. Stop from Settings: no leftover VPN key icon, no running service.
 
+## Identity provider integration (provider-agnostic)
+
+Implemented without choosing a vendor (`services/api/src/oidc.ts`, `server.ts`):
+
+* Set `KICKS_OIDC_ISSUER`, `KICKS_OIDC_AUDIENCE` and `KICKS_OIDC_JWKS_URI` (https). The API verifies
+  RS256/ES256 JWTs (signature against the JWKS with refresh on unknown `kid`, `iss`, `aud`, `exp`,
+  `nbf`, non-empty `sub`); `alg=none`/HS* are rejected. `sub` is the account ID.
+* `POST /v1/devices/enroll` binds a device ID to `sub`; another account gets
+  `403 device_owned_by_another_account`. `POST /v1/devices/:id/revoke` revokes a device.
+* `GET /v1/collector/eligibility` returns session/owner/consent/data-sharing state; `PUT /v1/data-sharing`
+  sets the separate sharing choice. Uploads and consent events accept an IdP token only together with
+  an `X-Kicks-Device` header for a device enrolled to that account.
+* Mobile: `apps/mobile/services/identityApi.ts` enrolls and calls `setSession` / `clearSession`.
+* Tests: `services/api/src/oidc.test.ts` uses a locally generated key pair.
+
+The legacy admin-minted staging device token path still exists for existing tests and should be
+removed/disabled once a real provider is configured. State is still in-memory (not yet PostgreSQL).
+
 ## Remaining blockers (external, not implemented here)
 
-* No identity provider issuer/audience/signing keys are configured and no real sign-in provider is
-  connected, so nothing calls `setSession` yet and enrollment cannot complete.
-* `GET /v1/collector/eligibility` (session, ownership, consent, data-sharing) does not exist on the
-  backend; this client defines the expected contract. Server-side OS-permission attestation and
-  device-unlink flows are also pending.
-* Physical-device evidence and the 30 consent acceptance cases are not yet run.
+* The provider has not been selected: no tenant, issuer, audience, JWKS URI or Android client (PKCE,
+  `kicks://` redirect) exists, and no sign-in SDK is integrated, so no screen calls `enrollDevice` yet.
+* Token refresh, provider-side token revocation propagation (beyond short expiry and device revoke)
+  and persistent device/ownership storage are pending.
+* Physical-device evidence, a real-test-account lifecycle run and the 30 consent acceptance cases are
+  not yet run.
