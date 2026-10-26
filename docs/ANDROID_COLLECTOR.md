@@ -127,6 +127,11 @@ API settings for the Auth0 tenant (replace with the real tenant values):
 * `KICKS_OIDC_AUDIENCE=<API identifier created in Auth0>`
 * `KICKS_OIDC_JWKS_URI=https://<tenant>.<region>.auth0.com/.well-known/jwks.json`
 
+Non-production tenant (derived from the dashboard URL; not yet verified from this environment):
+`KICKS_OIDC_ISSUER=https://dev-dxqiztc3dpbtcfkd.us.auth0.com/`,
+`KICKS_OIDC_JWKS_URI=https://dev-dxqiztc3dpbtcfkd.us.auth0.com/.well-known/jwks.json`,
+`EXPO_PUBLIC_AUTH0_DOMAIN=dev-dxqiztc3dpbtcfkd.us.auth0.com`. The audience and client ID are still needed.
+
 Mobile build env: `EXPO_PUBLIC_AUTH0_DOMAIN`, `EXPO_PUBLIC_AUTH0_CLIENT_ID`, `EXPO_PUBLIC_AUTH0_AUDIENCE`;
 redirect `kicks://auth/callback` (allowed callback/logout URL in the Auth0 Native application, PKCE, refresh
 token rotation enabled, offline access on the API). `refreshSession` in `identityApi.ts` refreshes tokens
