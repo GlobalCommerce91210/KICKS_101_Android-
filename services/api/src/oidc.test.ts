@@ -76,3 +76,11 @@ test('uploads with an IdP token require an enrolled device owned by that account
   assert.equal((await app.inject({ method: 'POST', url: '/v1/metadata-batches', headers: auth(jwt()), payload: body })).statusCode, 401);
   assert.equal((await app.inject({ method: 'POST', url: '/v1/metadata-batches', headers: auth(jwt(), dev), payload: body })).statusCode, 202);
 });
+
+test('staging device route is off by default and enrollment is rate limited', async () => {
+  const off = buildServer({ adminSecret: 's' });
+  assert.equal((await off.inject({ method: 'POST', url: '/v1/staging/devices', headers: { 'x-admin-secret': 's' }, payload: { subjectId: randomUUID() } })).statusCode, 404);
+  const app = setup(); let last = 0;
+  for (let i = 0; i < 40; i++) last = (await app.inject({ method: 'POST', url: '/v1/devices/enroll', payload: { deviceId: randomUUID() } })).statusCode;
+  assert.equal(last, 429);
+});

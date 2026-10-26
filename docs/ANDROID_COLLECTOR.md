@@ -111,11 +111,36 @@ Implemented without choosing a vendor (`services/api/src/oidc.ts`, `server.ts`):
 The legacy admin-minted staging device token path still exists for existing tests and should be
 removed/disabled once a real provider is configured. State is still in-memory (not yet PostgreSQL).
 
+## Provider mapping (decision: Auth0 as consumer broker)
+
+| Audience | Provider | Notes |
+| --- | --- | --- |
+| KICK'S consumers | **Auth0** (Google, Apple, passwordless/email recovery) | API trusts only the Auth0 issuer; account ID = Auth0 `sub`, never email (Apple may hide it) |
+| Workforce / admins | Microsoft Entra ID | admin tooling only |
+| Approved partners | Enterprise OIDC federation (Entra, Okta, Google Workspace, WorkOS) | not used by the consumer app |
+| Engineering tools | GitHub, federated through workforce identity | |
+| Private/self-hosted | Keycloak | same OIDC settings apply |
+
+API settings for the Auth0 tenant (replace with the real tenant values):
+
+* `KICKS_OIDC_ISSUER=https://<tenant>.<region>.auth0.com/` (trailing slash is part of the Auth0 issuer)
+* `KICKS_OIDC_AUDIENCE=<API identifier created in Auth0>`
+* `KICKS_OIDC_JWKS_URI=https://<tenant>.<region>.auth0.com/.well-known/jwks.json`
+
+Mobile build env: `EXPO_PUBLIC_AUTH0_DOMAIN`, `EXPO_PUBLIC_AUTH0_CLIENT_ID`, `EXPO_PUBLIC_AUTH0_AUDIENCE`;
+redirect `kicks://auth/callback` (allowed callback/logout URL in the Auth0 Native application, PKCE, refresh
+token rotation enabled, offline access on the API). `refreshSession` in `identityApi.ts` refreshes tokens
+and ends the session (stop + purge) when Auth0 rejects the refresh token.
+
+Also done: `POST /v1/staging/devices` now returns 404 unless `KICKS_ENABLE_STAGING_DEVICES=true`;
+enrollment, revoke, data-sharing and eligibility routes are rate limited (30/min per client, `@fastify/rate-limit`).
+
 ## Remaining blockers (external, not implemented here)
 
-* The provider has not been selected: no tenant, issuer, audience, JWKS URI or Android client (PKCE,
-  `kicks://` redirect) exists, and no sign-in SDK is integrated, so no screen calls `enrollDevice` yet.
-* Token refresh, provider-side token revocation propagation (beyond short expiry and device revoke)
-  and persistent device/ownership storage are pending.
+* The Auth0 tenant is not configured in this repo: tenant domain, API audience, Native app client ID, and
+  the Google and Apple social connections must be created in the Auth0 dashboard (not accessible from here).
+* The native sign-in screen (AppAuth/Auth0 SDK with PKCE, `kicks://` redirect) is not implemented; it needs
+  an Android build to compile and test, so nothing calls `enrollDevice` yet.
+* Persistent device/ownership storage (API state is in-memory) and a periodic refresh scheduler are pending.
 * Physical-device evidence, a real-test-account lifecycle run and the 30 consent acceptance cases are
   not yet run.
