@@ -1,0 +1,11 @@
+name: KICK’S Web Preview
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  deploy_web:
+    name: Build and deploy KICK’S web preview
+    type: deploy
+    params:
+      alias: kicks-web-preview
