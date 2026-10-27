@@ -25,6 +25,9 @@
     "ios": {
       "bundleIdentifier": "com.datastorm.kicks",
       "supportsTablet": true
+    },
+    "web": {
+      "output": "static"
     }
   }
 }
