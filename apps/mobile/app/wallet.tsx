@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -21,6 +21,75 @@ import {
 const USER_ID = 'user_demo_01';
 
 type Tab = 'ledger' | 'by_app' | 'by_metadata';
+
+const LedgerEntryCard = memo(function LedgerEntryCard({ item }: { item: WalletLedgerEntry }) {
+  const total = (item.value * item.multiplier) + item.bonus;
+  const isDenied = item.permission_state === 'denied' || item.status === 'rejected';
+  return (
+    <Card>
+      <View style={ui.row}>
+        <View style={s.appTag}>
+          <Ionicons name="phone-portrait-outline" size={13} color={colors.orange} />
+          <Text style={s.appTagText}>{item.app_id}</Text>
+        </View>
+        <View style={s.tagsRow}>
+          <View style={[
+            s.permTag,
+            isDenied ? s.permTagDenied : s.permTagPermitted
+          ]}>
+            <Ionicons
+              name={isDenied ? 'shield-outline' : 'shield-checkmark-outline'}
+              size={10}
+              color={isDenied ? '#ff8a8a' : colors.green}
+            />
+            <Text style={[s.permTagText, isDenied ? s.permTextDenied : s.permTextPermitted]}>
+              {isDenied ? 'DENIED' : 'PERMITTED'}
+            </Text>
+          </View>
+          <View style={[
+            s.statusTag,
+            item.status === 'approved' && s.statusApproved,
+            item.status === 'settled' && s.statusSettled,
+            item.status === 'pending' && s.statusPending,
+            item.status === 'rejected' && s.statusRejected
+          ]}>
+            <Text style={s.statusTagText}>{item.status.toUpperCase()}</Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={ui.row}>
+        <View style={s.flex1}>
+          <Text style={s.buyerCategory}>{item.buyer_category}</Text>
+          <Text style={s.metaTypes}>
+            Types: {item.metadata_types.join(', ')}
+          </Text>
+          {item.denial_reason && (
+            <View style={s.denialReasonBox}>
+              <Ionicons name="alert-circle-outline" size={12} color="#ff7a7a" />
+              <Text style={s.denialReasonText}>{item.denial_reason}</Text>
+            </View>
+          )}
+        </View>
+        <View style={s.entryValueCol}>
+          <Text style={[s.entryTotal, isDenied && s.entryTotalDenied]}>
+            {isDenied ? '$0.00' : `+$${total.toFixed(2)}`}
+          </Text>
+          <Text style={s.entryBreakdown}>
+            Base: ${item.value.toFixed(2)} · Multi: {item.multiplier}x
+          </Text>
+        </View>
+      </View>
+
+      <View style={s.entryFooter}>
+        <Text style={s.ledgerRef}>Ref: {item.ledger_id}</Text>
+        <Text style={s.entryTimestamp}>
+          {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </Text>
+      </View>
+    </Card>
+  );
+});
 
 export default function Wallet() {
   const [activeTab, setActiveTab] = useState<Tab>('ledger');
@@ -75,13 +144,8 @@ export default function Wallet() {
         permitted: res.permitted,
         reason: res.denial_reason
       });
-      // Reload summary and ledger
-      const [sum, led] = await Promise.all([
-        walletApi.getWalletSummary(USER_ID),
-        walletApi.getWalletLedger(USER_ID, 1, 50)
-      ]);
-      setSummary(sum);
-      setLedger(led.items);
+      setSummary(res.summary);
+      setLedger(res.ledger.items);
     } catch (err) {
       console.warn('Error recording event earnings', err);
     } finally {
@@ -104,13 +168,8 @@ export default function Wallet() {
       if (res.payout) {
         setCompletedPayout(res.payout);
       }
-      // Refresh wallet
-      const [sum, led] = await Promise.all([
-        walletApi.getWalletSummary(USER_ID),
-        walletApi.getWalletLedger(USER_ID, 1, 50)
-      ]);
-      setSummary(sum);
-      setLedger(led.items);
+      setSummary(res.summary);
+      setLedger(res.ledger.items);
     } catch (err) {
       console.warn('Payout error', err);
       setPayoutError('Network error or server unavailable');
@@ -349,74 +408,9 @@ export default function Wallet() {
                 <Text style={s.entriesCount}>{ledger.length} entries</Text>
               </View>
 
-              {ledger.map(item => {
-                const total = (item.value * item.multiplier) + item.bonus;
-                const isDenied = item.permission_state === 'denied' || item.status === 'rejected';
-                return (
-                  <Card key={item.ledger_id}>
-                    <View style={ui.row}>
-                      <View style={s.appTag}>
-                        <Ionicons name="phone-portrait-outline" size={13} color={colors.orange} />
-                        <Text style={s.appTagText}>{item.app_id}</Text>
-                      </View>
-                      <View style={s.tagsRow}>
-                        <View style={[
-                          s.permTag,
-                          isDenied ? s.permTagDenied : s.permTagPermitted
-                        ]}>
-                          <Ionicons
-                            name={isDenied ? 'shield-outline' : 'shield-checkmark-outline'}
-                            size={10}
-                            color={isDenied ? '#ff8a8a' : colors.green}
-                          />
-                          <Text style={[s.permTagText, isDenied ? s.permTextDenied : s.permTextPermitted]}>
-                            {isDenied ? 'DENIED' : 'PERMITTED'}
-                          </Text>
-                        </View>
-                        <View style={[
-                          s.statusTag,
-                          item.status === 'approved' && s.statusApproved,
-                          item.status === 'settled' && s.statusSettled,
-                          item.status === 'pending' && s.statusPending,
-                          item.status === 'rejected' && s.statusRejected
-                        ]}>
-                          <Text style={s.statusTagText}>{item.status.toUpperCase()}</Text>
-                        </View>
-                      </View>
-                    </View>
-
-                    <View style={ui.row}>
-                      <View style={s.flex1}>
-                        <Text style={s.buyerCategory}>{item.buyer_category}</Text>
-                        <Text style={s.metaTypes}>
-                          Types: {item.metadata_types.join(', ')}
-                        </Text>
-                        {item.denial_reason && (
-                          <View style={s.denialReasonBox}>
-                            <Ionicons name="alert-circle-outline" size={12} color="#ff7a7a" />
-                            <Text style={s.denialReasonText}>{item.denial_reason}</Text>
-                          </View>
-                        )}
-                      </View>
-                      <View style={s.entryValueCol}>
-                        <Text style={[s.entryTotal, isDenied && s.entryTotalDenied]}>
-                          {isDenied ? '$0.00' : `+$${total.toFixed(2)}`}
-                        </Text>
-                        <Text style={s.entryBreakdown}>
-                          Base: ${item.value.toFixed(2)} · Multi: {item.multiplier}x
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={s.entryFooter}>
-                      <Text style={s.ledgerRef}>Ref: {item.ledger_id}</Text>
-                      <Text style={s.entryTimestamp}>
-                        {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </Text>
-                    </View>
-                  </Card>
-                );
-              })}
+              {ledger.map(item => (
+                <LedgerEntryCard key={item.ledger_id} item={item} />
+              ))}
             </View>
           )}
 

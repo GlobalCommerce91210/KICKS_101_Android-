@@ -1,0 +1,27 @@
+name: ios-build
+on:
+  workflow_dispatch:
+    inputs:
+      submit:
+        description: Submit to App Store Connect after the build succeeds
+        type: boolean
+        default: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm install --no-package-lock
+        working-directory: .
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - run: eas build -p ios --profile production --non-interactive --wait
+      - if: ${{ inputs.submit }}
+        run: eas submit -p ios --profile production --latest --non-interactive

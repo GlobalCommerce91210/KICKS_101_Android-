@@ -7,6 +7,10 @@
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "plugins": ["expo-router"],
+    "ios": {
+      "bundleIdentifier": "com.datastorm.kicks",
+      "supportsTablet": false
+    },
     "android": {
       "package": "com.datastorm.kicks",
       "adaptiveIcon": { "backgroundColor": "#081A18" }

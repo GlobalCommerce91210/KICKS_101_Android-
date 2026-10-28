@@ -1,7 +1,8 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import {
@@ -114,7 +115,11 @@ export function buildServer(options:{store?:Store;adminSecret?:string;intelligen
     const event_id = body?.event_id ?? `evt-${randomUUID().slice(0, 8)}`;
     const user_id = body?.user_id ?? 'user_demo_01';
     const result = walletEngine.recordEventEarnings(event_id, user_id);
-    return reply.code(200).send(result);
+    return reply.code(200).send({
+      ...result,
+      summary: walletEngine.getSummary(user_id),
+      ledger: walletEngine.getLedger(user_id, 1, 50)
+    });
   });
 
   app.get('/v1/wallet/:user_id', async (req, reply) => {
@@ -141,7 +146,11 @@ export function buildServer(options:{store?:Store;adminSecret?:string;intelligen
       return reply.code(400).send({ error: 'invalid_amount' });
     }
     const result = walletEngine.requestPayout(user_id, amount, method);
-    return reply.code(200).send(result);
+    return reply.code(200).send({
+      ...result,
+      summary: walletEngine.getSummary(user_id),
+      ledger: walletEngine.getLedger(user_id, 1, 50)
+    });
   });
 
   app.get('/v1/wallet/:user_id/progress', async (req, reply) => {
@@ -246,25 +255,31 @@ const MIME_TYPES: Record<string, string> = {
   '.woff': 'font/woff',
   '.woff2': 'font/woff2'
 };
+const staticDir = [
+  resolve(process.cwd(), 'dist'),
+  resolve(process.cwd(), 'apps/mobile/dist'),
+  resolve(process.cwd(), '../../dist'),
+  resolve(process.cwd(), '../../apps/mobile/dist')
+].find(d => existsSync(join(d, 'index.html')));
 app.setNotFoundHandler(async (req, reply) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return reply.code(404).send({ error: 'not_found' });
   }
-  const staticDirs = [
-    resolve(process.cwd(), 'dist'),
-    resolve(process.cwd(), 'apps/mobile/dist'),
-    resolve(process.cwd(), '../../dist'),
-    resolve(process.cwd(), '../../apps/mobile/dist')
-  ];
-  const staticDir = staticDirs.find(d => existsSync(join(d, 'index.html')));
   if (!staticDir) {
     return reply.code(404).send({ error: 'not_found' });
   }
   const cleanPath = req.url.split('?')[0]?.replace(/^\/+/, '') ?? '';
-  const candidate = join(staticDir, cleanPath);
-  const targetFile = (cleanPath && existsSync(candidate) && statSync(candidate).isFile())
-    ? candidate
-    : join(staticDir, 'index.html');
+  let targetFile = join(staticDir, 'index.html');
+  if (cleanPath) {
+    const candidate = join(staticDir, cleanPath);
+    try {
+      if ((await stat(candidate)).isFile()) {
+        targetFile = candidate;
+      }
+    } catch {
+      // fall back to index.html
+    }
+  }
   const ext = extname(targetFile).toLowerCase();
   const contentType = MIME_TYPES[ext] ?? 'application/octet-stream';
   reply.type(contentType);

@@ -66,7 +66,14 @@ function getBaseUrl(): string {
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
     return window.location.origin;
   }
-  return 'http://localhost:3000';
+  // Physical devices cannot reach the dev machine via localhost: set EXPO_PUBLIC_API_URL
+  // to the dev machine's LAN IP (e.g. http://192.168.1.20:3000). 10.0.2.2 reaches the
+  // host's localhost from the Android emulator.
+  const envUrl = process.env.EXPO_PUBLIC_API_URL;
+  if (envUrl) {
+    return envUrl.replace(/\/+$/, '');
+  }
+  return Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
 }
 
 export const walletApi = {
@@ -108,6 +115,8 @@ export const walletApi = {
     ledger_entry: WalletLedgerEntry;
     wallet: WalletAccount;
     progression_update: ProgressionState;
+    summary: WalletSummary;
+    ledger: { items: WalletLedgerEntry[]; page: number; page_size: number };
   }> {
     const res = await fetch(`${getBaseUrl()}/v1/wallet/events/earn`, {
       method: 'POST',
@@ -127,6 +136,8 @@ export const walletApi = {
     denial_reason: string | null;
     payout?: PayoutRequest;
     wallet: WalletAccount;
+    summary: WalletSummary;
+    ledger: { items: WalletLedgerEntry[]; page: number; page_size: number };
   }> {
     const res = await fetch(`${getBaseUrl()}/v1/wallet/${encodeURIComponent(userId)}/payout`, {
       method: 'POST',

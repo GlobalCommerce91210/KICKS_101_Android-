@@ -50,11 +50,14 @@ export interface ConsentLogEntry {
   timestamp: string;
 }
 
+const MAX_CONSENT_LOG_ENTRIES = 1_000;
+
 export class PermissionsEngine {
   private userApps = new Map<string, AppPermission[]>();
   private userMetadata = new Map<string, Map<string, MetadataPermission[]>>();
   private userBuyers = new Map<string, BuyerPermission[]>();
   private consentLogs = new Map<string, ConsentLogEntry[]>();
+  private versions = new Map<string, number>();
   private intelligenceEngine?: IntelligenceEngine;
 
   constructor(intelligenceEngine?: IntelligenceEngine) {
@@ -225,6 +228,14 @@ export class PermissionsEngine {
     this.consentLogs.set(userId, logs);
   }
 
+  public getVersion(userId: string): number {
+    return this.versions.get(userId) ?? 0;
+  }
+
+  private bumpVersion(userId: string) {
+    this.versions.set(userId, this.getVersion(userId) + 1);
+  }
+
   public getAppPermissions(userId: string): AppPermission[] {
     if (!this.userApps.has(userId)) {
       this.seedDefaultUser(userId);
@@ -256,6 +267,7 @@ export class PermissionsEngine {
 
     const updatedList = Array.from(existingMap.values());
     this.userApps.set(userId, updatedList);
+    this.bumpVersion(userId);
     return updatedList;
   }
 
@@ -313,6 +325,7 @@ export class PermissionsEngine {
 
     const updated = Array.from(existingMap.values());
     this.userMetadata.get(userId)?.set(appId, updated);
+    this.bumpVersion(userId);
 
     // Sync to IntelligenceEngine gates if present
     if (this.intelligenceEngine) {
@@ -360,6 +373,7 @@ export class PermissionsEngine {
 
     const updated = Array.from(existingMap.values());
     this.userBuyers.set(userId, updated);
+    this.bumpVersion(userId);
     return updated;
   }
 
@@ -401,6 +415,9 @@ export class PermissionsEngine {
   private appendLog(entry: ConsentLogEntry) {
     const list = this.consentLogs.get(entry.user_id) ?? [];
     list.unshift(entry);
+    if (list.length > MAX_CONSENT_LOG_ENTRIES) {
+      list.length = MAX_CONSENT_LOG_ENTRIES;
+    }
     this.consentLogs.set(entry.user_id, list);
   }
 }
