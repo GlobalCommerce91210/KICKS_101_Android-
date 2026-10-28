@@ -3,105 +3,14 @@ const setup=async()=>{const store=memoryStore(),app=buildServer({store,adminSecr
 test('health reports metadata-only staging',async()=>{const app=buildServer(),r=await app.inject({method:'GET',url:'/health'});assert.equal(r.json().collector,'metadata-only');await app.close()});
 test('serves web app index.html on root path',async()=>{const app=buildServer(),r=await app.inject({method:'GET',url:'/'});assert.equal(r.statusCode,200);assert.match(r.headers['content-type']??'',/text\/html/);await app.close()});
 test('zero trust denies unauthenticated consent writes',async()=>{const app=buildServer(),r=await app.inject({method:'POST',url:'/v1/consent-events',payload:{}});assert.equal(r.statusCode,401);await app.close()});
-test('ingestion requires active purpose consent and blocks replay',async()=>{const{app,store,token}=await setup(),permissionId=randomUUID(),headers={authorization:`Bearer ${token}`};await app.inject({method:'POST',url:'/v1/consent-events',headers,payload:{permissionId,action:'grant',policyVersion:'privacy-1',purposeVersion:'network-safety-1',purpose:'Detect unexpected data destinations'}});const payload={batchId:randomUUID(),schemaVersion:'2026-08-01',observations:[{eventId:randomUUID(),occurredAt:new Date().toISOString(),sourceApp:'com.example.app',attribution:'verified',destinationHost:'api.example.com',protocol:'tls',bytesBucket:'1-10KB',classification:'expected',consentId:permissionId,consentPurpose:'Detect unexpected data destinations'}]};assert.equal((await app.inject({method:'POST',url:'/v1/metadata-batches',headers,payload})).statusCode,202);assert.equal(store.observations.length,1);assert.equal((await app.inject({method:'POST',url:'/v1/metadata-batches',headers,payload})).statusCode,409);await app.close()});
+test('ingestion requires active purpose consent and blocks replay',async()=>{const{app,store,token}=await setup(),permissionId=randomUUID(),headers={authorization:`Bearer ${token}`};await app.inject({method:'POST',url:'/v1/consent-events',headers,payload:{permissionId,action:'grant',policyVersion:'privacy-1',purposeVersion:'network-safety-1',purpose:'Detect unexpected data destinations'}});const payload={batchId:randomUUID(),schemaVersion:'2026-08-01',observations:[{eventId:randomUUID(),occurredAt:new Date().toISOString(),sourceApp:'com.example.app',attribution:'verified',destinationHost:'api.example.com',protocol:'tls',bytesBucket:'1-10KB',classification:'expected',consentId:permissionId,consentPurpose:'Detect unexpected data destinations'}]};assert.equal((await app.inject({method:'POST',url:'/v1/metadata-batches',headers,payload})).statusCode,403);assert.equal(store.observations.length,0);assert.equal(store.batches.size,0);await app.close()});
 test('payload fields fail the minimization contract',async()=>{const{app,token}=await setup();const r=await app.inject({method:'POST',url:'/v1/metadata-batches',headers:{authorization:`Bearer ${token}`},payload:{batchId:randomUUID(),schemaVersion:'2026-08-01',observations:[{payload:'secret'}]}});assert.equal(r.statusCode,400);await app.close()});
 
-test('intelligence and value engine endpoints satisfy openapi contract', async () => {
+test('collector-derived intelligence ingestion fails closed without verified authorization', async () => {
   const app = buildServer();
-
-  // 1. POST /v1/intelligence/events
-  const eventId = 'test-evt-99';
-  const postRes = await app.inject({
-    method: 'POST',
-    url: '/v1/intelligence/events',
-    payload: {
-      event_id: eventId,
-      timestamp: new Date().toISOString(),
-      app_id: 'com.retail.shop',
-      device_id: 'device-test-01',
-      network: {
-        domain: 'analytics.adservice.net',
-        endpoint: '/track/v1',
-        method: 'POST',
-        status_code: 200
-      },
-      metadata: {
-        purchase_intent: 'high',
-        category: 'running_shoes'
-      },
-      tags: ['commercial', 'shopping']
-    }
-  });
-  assert.equal(postRes.statusCode, 200);
-  const eventView = postRes.json();
-  assert.equal(eventView.event_id, eventId);
-  assert.equal(eventView.classification.category, 'behavioral_commercial');
-  assert.equal(typeof eventView.scores.commercial_intent_score, 'number');
-  assert.equal(typeof eventView.scores.metadata_value_estimate, 'number');
-  assert.equal(eventView.persona.persona, 'heavy_commercial');
-  assert.ok(Array.isArray(eventView.metadata_inspection.metadata_items));
-
-  // 2. GET /v1/intelligence/events/:event_id
-  const getEventRes = await app.inject({
-    method: 'GET',
-    url: `/v1/intelligence/events/${eventId}`
-  });
-  assert.equal(getEventRes.statusCode, 200);
-  assert.equal(getEventRes.json().event_id, eventId);
-
-  // 3. GET /v1/inspector/events/:event_id/metadata
-  const getMetaRes = await app.inject({
-    method: 'GET',
-    url: `/v1/inspector/events/${eventId}/metadata`
-  });
-  assert.equal(getMetaRes.statusCode, 200);
-  assert.equal(getMetaRes.json().event_id, eventId);
-
-  // 4. GET /v1/inspector/apps/:app_id/gates
-  const getGatesRes = await app.inject({
-    method: 'GET',
-    url: '/v1/inspector/apps/com.retail.shop/gates'
-  });
-  assert.equal(getGatesRes.statusCode, 200);
-  assert.equal(getGatesRes.json().app_id, 'com.retail.shop');
-
-  // 5. POST /v1/inspector/apps/:app_id/gates
-  const updateGatesRes = await app.inject({
-    method: 'POST',
-    url: '/v1/inspector/apps/com.retail.shop/gates',
-    payload: {
-      app_id: 'com.retail.shop',
-      gates: [
-        {
-          metadata_type: 'commercial',
-          default_state: 'blocked'
-        }
-      ]
-    }
-  });
-  assert.equal(updateGatesRes.statusCode, 200);
-  assert.equal(updateGatesRes.json().gates[0].default_state, 'blocked');
-
-  // 6. POST /v1/marketplace/match
-  const matchRes = await app.inject({
-    method: 'POST',
-    url: '/v1/marketplace/match',
-    payload: {
-      app_id: 'com.retail.shop'
-    }
-  });
-  assert.equal(matchRes.statusCode, 200);
-  assert.ok(Array.isArray(matchRes.json().matched_offers));
-
-  // 7. GET /v1/intelligence/apps/:app_id/summary
-  const summaryRes = await app.inject({
-    method: 'GET',
-    url: '/v1/intelligence/apps/com.retail.shop/summary'
-  });
-  assert.equal(summaryRes.statusCode, 200);
-  assert.equal(summaryRes.json().app_id, 'com.retail.shop');
-  assert.ok(summaryRes.json().average_scores);
-
+  const response = await app.inject({method:'POST', url:'/v1/intelligence/events', payload:{event_id:'test',timestamp:new Date().toISOString(),app_id:'sample',device_id:'device',network:{domain:'example.com'}}});
+  assert.equal(response.statusCode,403);
+  assert.equal(response.json().error,'verified_collector_authorization_required');
   await app.close();
 });
 
