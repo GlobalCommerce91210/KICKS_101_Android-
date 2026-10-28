@@ -14,6 +14,7 @@ class KicksVpnService : VpnService() {
   companion object {
     const val ACTION_START = "com.datastorm.kicks.vpn.START"
     const val ACTION_STOP = "com.datastorm.kicks.vpn.STOP"
+    const val FORWARDING_IMPLEMENTED: Boolean = false
     private const val CHANNEL_ID = "kicks_privacy_monitor"
     private const val NOTIFICATION_ID = 731
   }
@@ -23,6 +24,10 @@ class KicksVpnService : VpnService() {
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     if (intent?.action == ACTION_STOP) {
       stopForeground(STOP_FOREGROUND_REMOVE)
+      stopSelf()
+      return START_NOT_STICKY
+    }
+    if (!FORWARDING_IMPLEMENTED) {
       stopSelf()
       return START_NOT_STICKY
     }

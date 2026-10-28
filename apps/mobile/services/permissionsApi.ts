@@ -50,10 +50,12 @@ export interface ConsentLogEntry {
 }
 
 function getBaseUrl(): string {
+  const configured = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
+  if (configured) return configured.replace(/\/+$/, '');
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
     return window.location.origin;
   }
-  return 'http://localhost:3000';
+  throw new Error('EXPO_PUBLIC_API_BASE_URL is required on native devices; refusing to call device-local localhost.');
 }
 
 export const permissionsApi = {

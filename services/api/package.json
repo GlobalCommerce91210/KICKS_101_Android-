@@ -7,11 +7,14 @@
     "dev": "tsx watch src/start.ts",
     "start": "tsx src/start.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test src/*.test.ts"
+    "test": "node --import tsx --test src/*.test.ts",
+    "migrate": "tsx src/migrate.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
+    "@fastify/rate-limit": "^11.2.1",
     "fastify": "^5.4.0",
+    "jose": "6.2.13",
     "pg": "^8.23.0",
     "zod": "^3.25.0"
   },
