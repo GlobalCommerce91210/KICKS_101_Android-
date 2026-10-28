@@ -8,6 +8,7 @@
     "build": "npm run build:web --workspace @kicks/mobile && node -e \"const fs=require('fs'); fs.mkdirSync('dist',{recursive:true}); fs.cpSync('apps/mobile/dist','dist',{recursive:true});\"",
     "start": "npm run start --workspace @kicks/api",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "pretest": "npm run build:web --workspace @kicks/mobile",
     "test": "npm run test --workspaces --if-present"
   },
   "engines": { "node": ">=20" },
