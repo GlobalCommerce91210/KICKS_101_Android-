@@ -5,7 +5,7 @@ import { selectIosNativeAdapter } from '../services/iosNativeAdapter.mjs';
 import { randomUUID } from 'expo-crypto';
 import { Card, ui } from './Brand';
 import { useSession } from './SessionProvider';
-import { activateIosCollector, verifiedCollectorConnection, verifiedCollectorStopped, type BoundCollectorConsent } from '../services/iosCollectorActivation.mjs';
+import { activateIosCollector, isCompleteCollectorStatus, verifiedCollectorConnection, verifiedCollectorStopped, type BoundCollectorConsent } from '../services/iosCollectorActivation.mjs';
 import { useMonitoringPolicy } from './useMonitoringPolicy';
 
 const states: Record<string, string> = {
@@ -21,6 +21,9 @@ export function IosCollectorControls({ disabled = false, onBusyChange }: { disab
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const flight = useRef(false);
+  const startInFlight = useRef(false);
+  const stopRequested = useRef(false);
+  const runGeneration = useRef(0);
   const mounted = useRef(true);
   const usableNative = selectIosNativeAdapter(Platform.OS,
     Platform.OS === 'ios' ? requireOptionalNativeModule('KicksTunnel') : null,
@@ -52,7 +55,16 @@ export function IosCollectorControls({ disabled = false, onBusyChange }: { disab
     if (mounted.current) setState('off');
   };
   const stopFromControl = async () => {
-    if (flight.current || disabled) return;
+    if (disabled) return;
+    stopRequested.current = true;
+    runGeneration.current += 1;
+    // Accept Stop while Start is awaiting disclosure, consent, lease or iOS.
+    // The activation service performs the post-await cancellation and cleanup.
+    if (startInFlight.current) {
+      if (mounted.current) { setState('connecting'); setError('Stop requested; canceling collector start.'); }
+      return;
+    }
+    if (flight.current) return;
     flight.current = true; setBusy(true); onBusyChange?.(true); setError(null);
     try { await stop(); }
     catch { if (mounted.current) { setState('stop_unconfirmed'); setError('Turn off KICK’S VPN in iOS Settings.'); } }
@@ -60,13 +72,15 @@ export function IosCollectorControls({ disabled = false, onBusyChange }: { disab
   };
   const start = async () => {
     if (flight.current || disabled) return;
-    flight.current = true; setBusy(true); onBusyChange?.(true); setError(null);
+    flight.current = true; startInFlight.current = true; stopRequested.current = false; const startRun = ++runGeneration.current; setBusy(true); onBusyChange?.(true); setError(null);
     try {
       const subjectId = manager.user?.subjectId;
       const generation = manager.sessionGeneration;
       if (!configured) throw new Error('The reviewed collection purpose is not configured for this build. Monitoring remains off.');
       const result = await activateIosCollector({
-        subject: () => mounted.current && manager.sessionGeneration === generation && manager.user?.subjectId === subjectId ? subjectId ?? null : null, policy, native: usableNative,
+        subject: () => mounted.current && manager.sessionGeneration === generation && manager.user?.subjectId === subjectId ? subjectId ?? null : null,
+        isCanceled: () => stopRequested.current || runGeneration.current !== startRun,
+        policy, native: usableNative,
         provision: usableNative?.provision ? async () => {
           await manager.provisionIosCollector({ provision: usableNative.provision!.bind(usableNative) });
         } : undefined,
@@ -95,7 +109,7 @@ export function IosCollectorControls({ disabled = false, onBusyChange }: { disab
         const message = failure instanceof Error ? failure.message : 'Collector activation failed.';
         setError(message); setState(message.includes('stop could not be confirmed') ? 'stop_unconfirmed' : /unavailable|incomplete|unknown/i.test(message) ? 'offline_unknown' : 'off');
       }
-    } finally { flight.current = false; onBusyChange?.(false); if (mounted.current) setBusy(false); }
+    } finally { startInFlight.current = false; flight.current = false; onBusyChange?.(false); if (mounted.current) setBusy(false); }
   };
   useEffect(() => {
     mounted.current = true;
@@ -103,7 +117,7 @@ export function IosCollectorControls({ disabled = false, onBusyChange }: { disab
       setState('checking');
       void usableNative.getStatus().then(status => {
         if (!mounted.current) return;
-        if (!status || status.unavailableReason || typeof status.connected !== 'boolean' || typeof status.collecting !== 'boolean') {
+        if (!isCompleteCollectorStatus(status)) {
           setState('offline_unknown'); setError(status?.unavailableReason ?? 'Existing collector status is unavailable or incomplete.'); return;
         }
         setState(status.connected === true || status.collecting === true ? 'connected_waiting_for_evidence' : 'off');
@@ -151,8 +165,8 @@ export function IosCollectorControls({ disabled = false, onBusyChange }: { disab
     {policyError && <><Text accessibilityRole="alert" style={ui.body}>{policyError}</Text><Pressable accessibilityRole="button" disabled={busy} onPress={retry}><Text style={ui.label}>RETRY COLLECTION SETUP</Text></Pressable></>}
     {!usableNative && <Text accessibilityRole="alert" style={ui.body}>The native extension is unavailable. Install a verified staging build containing the signed Packet Tunnel extension, then retry. No fallback collection is enabled.</Text>}
     <Text accessibilityRole="alert" style={ui.body}>{states[state] ?? 'Checking collector status.'}</Text>
-    <Pressable accessibilityRole="button" disabled={disabled || busy || state === 'checking' || !usableNative || (state === 'off' && !configured)} style={{minHeight:44,justifyContent:'center'}} onPress={() => {
-      if (['collecting', 'connected_waiting_for_evidence', 'stop_unconfirmed'].includes(state)) {
+    <Pressable accessibilityRole="button" disabled={disabled || state === 'checking' || !usableNative || (state === 'off' && !configured)} style={{minHeight:44,justifyContent:'center'}} onPress={() => {
+      if (startInFlight.current || ['collecting', 'connected_waiting_for_evidence', 'stop_unconfirmed'].includes(state)) {
         void stopFromControl();
       } else void start();
     }}><Text style={ui.label}>{busy ? 'CHECKING…' : state === 'off' ? 'SET UP COLLECTION' : 'STOP MONITORING'}</Text></Pressable>
