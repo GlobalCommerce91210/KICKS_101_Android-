@@ -8,6 +8,8 @@
     "packages/*"
   ],
   "scripts": {
+    "dev:web": "npm run start --workspace @kicks/mobile -- --web",
+    "build:web": "npm run build",
     "dev": "npm run dev --workspace @kicks/api",
     "build": "npm run build:web --workspace @kicks/mobile && node -e \"const fs=require('fs'); fs.mkdirSync('dist',{recursive:true}); fs.cpSync('apps/mobile/dist','dist',{recursive:true});\"",
     "start": "npm run start --workspace @kicks/api",

@@ -1,5 +1,6 @@
 import { router } from 'expo-router';
 import { IosCollectorControls } from '../components/IosCollectorControls';
+import { WebMonitoringControls } from '../components/WebMonitoringControls';
 import { useState } from 'react';
 import { Alert, Linking, NativeModules, Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { BrandHeader, Card, Screen, colors, ui } from '../components/Brand';
@@ -25,7 +26,7 @@ export default function Settings() {
     <Text style={ui.title}>Private by default.</Text>
     <Text style={ui.body}>Monitoring stays off until you review the disclosure and grant the permissions required by your device.</Text>
 
-    {Platform.OS === 'ios' ? <IosCollectorControls /> : <Card accent>
+    {Platform.OS === 'ios' ? <IosCollectorControls /> : Platform.OS === 'web' ? <WebMonitoringControls /> : <Card accent>
       <SettingRow title="Exfiltration monitoring" detail="Metadata only · no message or payload contents">
         <Switch value={monitoring} onValueChange={changeMonitoring} trackColor={{ false: '#493a32', true: '#8f4319' }} thumbColor={monitoring ? colors.orange : '#a69b94'} />
       </SettingRow>
