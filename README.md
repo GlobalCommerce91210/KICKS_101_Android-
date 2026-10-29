@@ -90,8 +90,7 @@ npm ci --ignore-scripts
 npm run dev:web
 ```
 
-The development server prints the browser URL. Browser API clients use their
-current origin; Expo's development server alone does not supply the KICK'S API.
+The development server prints the browser URL. Browser API clients prefer `EXPO_PUBLIC_API_URL`; when it is absent, web uses the current HTTPS `window.location.origin`, both through the strict remote-HTTPS origin validator. Local HTTP or loopback preview sign-in is unavailable unless an explicit approved HTTPS origin is configured. Expo's development server alone does not supply the KICK'S API.
 For an integrated local preview, export the real web application and start the
 API, which serves the generated web assets on the same origin:
 
