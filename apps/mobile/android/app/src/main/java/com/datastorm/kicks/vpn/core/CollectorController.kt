@@ -67,6 +67,24 @@ class CollectorController(
 
   fun explicitStop() = stop(Reason.USER_STOP)
 
+  /**
+   * Called by the session/logout adapter after a normal user stop. It is intentionally separate from
+   * [explicitStop]: a normal stop preserves pending work, while session end revokes its replayability.
+   * The purge is synchronous and does not require the upload worker to still be running.
+   */
+  fun onSessionEnded() {
+    var notify = false
+    synchronized(this) {
+      gate.deactivate()
+      worker.stop()
+      if (state != State.STOPPED || reason == null) notify = true
+      state = State.STOPPED
+      reason = Reason.SESSION_REVOKED
+      queue.purge()
+    }
+    if (notify) onStopped(Reason.SESSION_REVOKED)
+  }
+
   fun stop(why: Reason) {
     synchronized(this) {
       if (state == State.STOPPED && reason != null) return
