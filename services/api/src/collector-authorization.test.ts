@@ -263,3 +263,28 @@ test('intelligence events: synthetic fixtures are disabled by default and in pro
   assert.equal((await allowed.app.inject({ method: 'POST', url: '/v1/intelligence/events', headers: h, payload: telemetry(allowed.deviceId) })).statusCode, 200);
   assert.equal((await allowed.app.inject({ method: 'POST', url: '/v1/intelligence/events', headers: h, payload: telemetry('another-device') })).statusCode, 403);
 });
+
+test('optional device context header must match bearer-bound device and mismatches write nothing', async () => {
+  const { app, store, headers, deviceId } = await setup(undefined);
+  const noHeaderPermission = randomUUID();
+  const noHeader = await grant(app, headers, noHeaderPermission);
+  assert.equal(noHeader.statusCode, 202);
+
+  const matchingPermission = randomUUID();
+  const matching = await grant(app, { ...headers, 'x-kicks-device': deviceId }, matchingPermission);
+  assert.equal(matching.statusCode, 202);
+
+  const beforeConsentEvents = store.consentHistory.length;
+  const mismatched = await app.inject({
+    method: 'POST',
+    url: '/v1/metadata-batches',
+    headers: { ...headers, 'x-kicks-device': 'device-not-bound-to-token' },
+    payload: batchOf(noHeaderPermission)
+  });
+  assert.equal(mismatched.statusCode, 401);
+  assert.equal(store.consentHistory.length, beforeConsentEvents);
+  assert.equal(store.observations.length, 0);
+  assert.equal(store.batches.size, 0);
+  assert.equal(store.collectorAudit.length, 0);
+  await app.close();
+});
