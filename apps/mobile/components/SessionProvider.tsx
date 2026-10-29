@@ -3,11 +3,15 @@ import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { SessionManager, type AccountUser, type SessionStorage } from '../services/sessionCore';
 import { requireIosApiOrigin } from '../services/iosApiOrigin';
+import { selectWebApiOrigin } from '../services/webApiOrigin.js';
 const getBaseUrl = () => {
   try {
-    return requireIosApiOrigin(Platform.OS === 'ios'
+    const configuredOrigin = Platform.OS === 'ios'
       ? process.env.EXPO_PUBLIC_IOS_API_URL ?? process.env.EXPO_PUBLIC_API_URL
-      : process.env.EXPO_PUBLIC_API_URL);
+      : Platform.OS === 'web'
+        ? selectWebApiOrigin(process.env.EXPO_PUBLIC_API_URL, typeof window !== 'undefined' ? window.location.origin : undefined)
+        : process.env.EXPO_PUBLIC_API_URL;
+    return requireIosApiOrigin(configuredOrigin);
   } catch { throw new Error('Account service is unavailable. Try again later.'); }
 };
 
