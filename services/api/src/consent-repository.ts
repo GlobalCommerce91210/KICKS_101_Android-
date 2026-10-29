@@ -14,7 +14,10 @@ export type ConsentDecision = {
 };
 export type ConsentEvent = ConsentDecision & { id: string; occurredAt: string; eventSequence?: number };
 export type CurrentConsent = {
-  id: string;
+  // `id` is retained as a permission-id compatibility alias for older adapters.
+  id?: string;
+  decisionId?: string;
+  decisionVersion?: string;
   subjectId: string;
   purpose: string;
   policyVersion: string;
@@ -95,16 +98,17 @@ export class PostgresConsentRepository implements ConsentRepository {
   async getCurrent(permissionId: string): Promise<CurrentConsent | null> {
     const result = await this.pool.query<{
       id: string; subject_id: string; action: ConsentAction; policy_version: string;
-      purpose_version: string; purpose: string; occurred_at: Date | string;
+      purpose_version: string; purpose: string; event_sequence: number | string; occurred_at: Date | string;
     }>(
-      'SELECT id, subject_id, action, policy_version, purpose_version, purpose, occurred_at FROM consent_events WHERE permission_id = $1 ORDER BY event_sequence DESC LIMIT 1',
+      'SELECT id, subject_id, action, policy_version, purpose_version, purpose, event_sequence, occurred_at FROM consent_events WHERE permission_id = $1 ORDER BY event_sequence DESC LIMIT 1',
       [permissionId]
     );
     const row = result.rows[0];
     if (!row) return null;
     // Purpose is persisted with each event; legacy rows are explicitly non-authorizing.
     return {
-      id: permissionId, subjectId: row.subject_id, purpose: row.purpose,
+      id: permissionId, decisionId: row.id, decisionVersion: String(row.event_sequence),
+      subjectId: row.subject_id, purpose: row.purpose,
       policyVersion: row.policy_version, purposeVersion: row.purpose_version,
       state: row.action === 'grant' ? 'granted' : 'revoked'
     };
