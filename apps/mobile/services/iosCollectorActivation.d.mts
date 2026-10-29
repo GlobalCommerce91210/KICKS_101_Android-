@@ -11,10 +11,13 @@ export interface IosCollectorNative {
   stop(): Promise<void>;
   getStatus(): Promise<{deviceId?: string; permissionId?: string; activationId?: string; expiresAt?: string; connectionState?: string; connected?: boolean; consentVerified?: boolean; collecting?: boolean; lastAcceptedObservationAt?: string; unavailableReason?: string}>;
 }
+export function isCanonicalUuid(value: unknown): value is string;
+export function isCompleteCollectorStatus(status: Awaited<ReturnType<IosCollectorNative['getStatus']>> | null | undefined): boolean;
 export function verifiedCollectorStopped(status: Awaited<ReturnType<IosCollectorNative['getStatus']>> | null | undefined): boolean;
 export function verifiedCollectorConnection(status: Awaited<ReturnType<IosCollectorNative['getStatus']>>, consent: BoundCollectorConsent | null, now?: number): boolean;
 export function activateIosCollector(deps: {
   subject(): string | null;
+  isCanceled?(): boolean;
   disclose(): Promise<boolean>;
   provision?(): Promise<void>;
   renewLease?(): Promise<void>;
