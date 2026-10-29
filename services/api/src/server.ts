@@ -178,29 +178,6 @@ return r.code(200).send({eligible:true,state:'ELIGIBLE',deviceId:device.id,permi
     return reply.code(200).send(result);
   });
 
-  app.post('/v1/wallet/events/earn', async (req, reply) => {
-    const body = req.body as { event_id?: string; user_id?: string };
-    const event_id = body?.event_id ?? `evt-${randomUUID().slice(0, 8)}`;
-    const user_id = body?.user_id ?? 'user_demo_01';
-    const result = walletEngine.recordEventEarnings(event_id, user_id);
-    return reply.code(200).send(result);
-  });
-
-  app.get('/v1/wallet/:user_id', async (req, reply) => {
-    const { user_id } = req.params as { user_id: string };
-    const summary = walletEngine.getSummary(user_id);
-    return reply.code(200).send(summary);
-  });
-
-  app.get('/v1/wallet/:user_id/ledger', async (req, reply) => {
-    const { user_id } = req.params as { user_id: string };
-    const { page, page_size } = req.query as { page?: string; page_size?: string };
-    const p = page ? Math.max(1, parseInt(page, 10)) : 1;
-    const ps = page_size ? Math.min(200, Math.max(1, parseInt(page_size, 10))) : 50;
-    const result = walletEngine.getLedger(user_id, p, ps);
-    return reply.code(200).send(result);
-  });
-
   app.post('/v1/wallet/:user_id/payout', async (req, reply) => {
     const { user_id } = req.params as { user_id: string };
     const body = req.body as { amount?: number; method?: string };

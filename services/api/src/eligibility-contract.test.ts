@@ -92,3 +92,16 @@ test('eligibility is informational and ingestion reauthorizes separately', async
 
   await app.close();
 });
+
+test('buildServer registers the wallet earn route once and preserves wallet behavior', async () => {
+  const app = buildServer();
+  const eventId = 'evt-kick-011a-wallet-route';
+  const response = await app.inject({
+    method: 'POST',
+    url: '/v1/wallet/events/earn',
+    payload: { event_id: eventId, user_id: 'user_demo_01' }
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().ledger_entry.event_id, eventId);
+  await app.close();
+});
