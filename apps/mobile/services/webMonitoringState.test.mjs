@@ -1,8 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { WEB_MONITORING_STATES, shouldResetWebReview, webMonitoringContextKey, webMonitoringState } from './webMonitoringState.mjs';
+import { createWebRequestGuard, WEB_MONITORING_STATES, shouldResetWebReview, webMonitoringContextKey, webMonitoringState } from './webMonitoringState.mjs';
 
 const policy = { permissionId: 'permission-1', policyVersion: 'policy-1', purposeVersion: 'purpose-1', purpose: 'reviewed metadata monitoring' };
+const context = (overrides = {}) => ({ sessionGeneration: 1, accountSubjectId: 'account-1', deviceId: 'device-1', policy, ...overrides });
+function deferred() { let resolve; let reject; const promise = new Promise((res, rej) => { resolve = res; reject = rej; }); return { promise, resolve, reject }; }
+
+async function applyGuardedResponse(responsePromise, guard, request, currentContext, writes) {
+  if (!guard.isCurrent(request, currentContext())) return;
+  const response = await responsePromise;
+  if (!guard.isCurrent(request, currentContext())) return;
+  const body = await response.json();
+  if (!guard.isCurrent(request, currentContext())) return;
+  writes.consent = body.consent ?? null;
+}
 
 test('web monitoring state never presents browser control as active', () => {
   assert.equal(webMonitoringState({ accountSubjectId: null, deviceId: null, policyConfigured: false, freshReview: false }), WEB_MONITORING_STATES.sign_in_required);
@@ -22,4 +33,51 @@ test('account, device or policy context changes require fresh review', () => {
     webMonitoringContextKey({ accountSubjectId: 'account-1', deviceId: 'device-1', policy: { ...policy, purposeVersion: 'purpose-2' } }),
     webMonitoringContextKey({ accountSubjectId: 'account-1', deviceId: 'device-1', policy: { ...policy, purpose: 'changed reviewed purpose' } }),
   ]) assert.equal(shouldResetWebReview(base, next), true);
+});
+
+test('deferred old-device consent cannot overwrite a newer selected device', async () => {
+  const guard = createWebRequestGuard(); const writes = { consent: null }; let current = context({ deviceId: '' });
+  const oldResponse = deferred();
+  const oldRequest = guard.begin(current);
+  const selectedRequest = guard.begin(context({ deviceId: 'device-2' })); current = context({ deviceId: 'device-2' });
+  const old = applyGuardedResponse(oldResponse.promise, guard, oldRequest, () => current, writes);
+  oldResponse.resolve({ async json() { return { consent: { deviceId: 'device-1' } }; } });
+  await old;
+  assert.equal(writes.consent, null); assert.equal(guard.isCurrent(selectedRequest, current), true);
+});
+
+test('deferred response is rejected after account/session context changes', async () => {
+  const guard = createWebRequestGuard(); const writes = { consent: null, error: null }; let current = context();
+  const response = deferred(); const request = guard.begin(current);
+  const pending = applyGuardedResponse(response.promise, guard, request, () => current, writes);
+  current = context({ accountSubjectId: 'account-2', sessionGeneration: 2 }); guard.begin(current);
+  response.resolve({ async json() { return { consent: { deviceId: 'device-1' } }; } });
+  await pending;
+  assert.equal(writes.consent, null); assert.equal(writes.error, null);
+});
+
+test('stale deferred error cannot clear newer busy state or publish an error', async () => {
+  const guard = createWebRequestGuard(); const writes = { busy: true, error: null }; let current = context();
+  const response = deferred(); const request = guard.begin(current);
+  const pending = response.promise.catch(error => { if (guard.isCurrent(request, () => current)) writes.error = error.message; }).finally(() => { if (guard.isCurrent(request, () => current)) writes.busy = false; });
+  const newer = guard.begin(context({ deviceId: 'device-2' })); current = context({ deviceId: 'device-2' }); writes.busy = true;
+  response.reject(new Error('old device failed')); await pending;
+  assert.equal(writes.error, null); assert.equal(writes.busy, true); assert.equal(guard.isCurrent(newer, current), true);
+});
+
+test('initial deferred consent cannot overwrite later selection consent', async () => {
+  const guard = createWebRequestGuard(); const writes = { consent: null }; let current = context({ deviceId: '' });
+  const initialResponse = deferred(); const initialRequest = guard.begin(current);
+  const initial = applyGuardedResponse(initialResponse.promise, guard, initialRequest, () => current, writes);
+  const selection = guard.begin(context({ deviceId: 'device-2' })); current = context({ deviceId: 'device-2' });
+  writes.consent = { deviceId: 'device-2' };
+  initialResponse.resolve({ async json() { return { consent: { deviceId: 'device-1' } }; } });
+  await initial;
+  assert.deepEqual(writes.consent, { deviceId: 'device-2' }); assert.equal(guard.isCurrent(selection, current), true);
+});
+
+test('JSON context tuple prevents delimiter collisions', () => {
+  const left = webMonitoringContextKey({ accountSubjectId: 'a|b', deviceId: 'c', policy });
+  const right = webMonitoringContextKey({ accountSubjectId: 'a', deviceId: 'b|c', policy });
+  assert.notEqual(left, right);
 });
