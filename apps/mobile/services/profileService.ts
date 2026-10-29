@@ -2,6 +2,12 @@ import { SessionError, SessionManager } from './sessionCore.ts';
 
 type JsonObject = Record<string, any>;
 
+export interface WalletSummary {
+  total_earned: number;
+  total_pending: number;
+  total_settled: number;
+}
+
 export interface ConsumerProfileView {
   account: {
     subjectId: string;
@@ -17,7 +23,7 @@ export interface ConsumerProfileView {
   devices: JsonObject[];
   permissions: JsonObject | null;
   consentLog: JsonObject[];
-  wallet: JsonObject | null;
+  wallet: WalletSummary | null;
   monitoring: JsonObject | null;
   unavailable: string[];
 }
@@ -48,6 +54,18 @@ async function optionalJson(
   }
 }
 
+function parseWalletSummary(value: unknown): WalletSummary | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const totals = [candidate.total_earned, candidate.total_pending, candidate.total_settled];
+  if (!totals.every((total) => typeof total === 'number' && Number.isFinite(total) && total >= 0)) return null;
+  return {
+    total_earned: candidate.total_earned as number,
+    total_pending: candidate.total_pending as number,
+    total_settled: candidate.total_settled as number
+  };
+}
+
 export async function loadConsumerProfile(manager: SessionManager): Promise<ConsumerProfileView> {
   const user = manager.user;
   if (!user) throw new SessionError('Sign in to continue.');
@@ -72,7 +90,7 @@ export async function loadConsumerProfile(manager: SessionManager): Promise<Cons
 
   const unavailable: string[] = [];
   const encodedSubject = encodeURIComponent(user.subjectId);
-  const [consumerState, snapshot, devicesView, permissions, consent, wallet] = await Promise.all([
+  const [consumerState, snapshot, devicesView, permissions, consent, walletResponse] = await Promise.all([
     optionalJson(manager, '/v1/me/consumer-state', 'consumer state', unavailable),
     optionalJson(manager, '/core/consumer/v1/snapshot', 'consumer snapshot', unavailable),
     optionalJson(manager, '/core/consumer/v1/devices', 'connected devices', unavailable),
@@ -81,6 +99,8 @@ export async function loadConsumerProfile(manager: SessionManager): Promise<Cons
     optionalJson(manager, '/core/consumer/v1/wallet', 'wallet', unavailable)
   ]);
 
+  const wallet = parseWalletSummary(walletResponse);
+  if (wallet === null && !unavailable.includes('wallet')) unavailable.push('wallet');
   const devices = Array.isArray(devicesView) ? devicesView : Array.isArray(devicesView?.devices) ? devicesView.devices : [];
   const consentLog = Array.isArray(consent) ? consent : Array.isArray(consent?.items) ? consent.items : [];
   const monitoring = snapshot?.monitoring && typeof snapshot.monitoring === 'object' ? snapshot.monitoring : null;
