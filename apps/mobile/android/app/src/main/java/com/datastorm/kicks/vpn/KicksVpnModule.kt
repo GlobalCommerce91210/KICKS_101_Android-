@@ -103,11 +103,12 @@ class KicksVpnModule(private val context: ReactApplicationContext) : ReactContex
     }
   }
 
-  /** Logout / remote revocation handling: removes credentials and stops + purges immediately. */
+  /** Logout / remote revocation handling: removes credentials and purges queued observations immediately. */
   @ReactMethod
   fun clearSession(promise: Promise) {
-    components.sessions.clear()
-    components.controller.stop(Reason.NO_SESSION)
+    val c = components
+    c.sessions.clear()
+    c.controller.onSessionEnded()
     promise.resolve("cleared")
   }
 }
