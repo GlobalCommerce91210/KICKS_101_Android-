@@ -15,8 +15,8 @@ It combines:
 | Native Android | Repository root / Android modules | Active |
 | Expo / React Native | `apps/mobile` | Active — source of truth |
 | Expo package | `@kicks/mobile` | Active |
-| Current Expo version | `0.2.5` | Current |
-| Next functional target | `0.2.6` | Planned |
+| Current Expo version | `0.2.6` | Candidate — release gates pending |
+| Next functional target | `0.2.6` | In implementation; not release-ready |
 | Legacy Expo repo | `GlobalCommerce91210/KICK_S_App/apps/mobile` | Deprecated — no new work |
 
 > **Routing rule:** All new KICK’S mobile work goes to this repository. Do not route new mobile development to `KICK_S_App/apps/mobile`.
@@ -81,7 +81,7 @@ For native Android work, use the repository's Gradle/Android Studio workflow.
 
 ## Versioning direction
 
-The Expo workspace is currently **0.2.5**. The next aligned KICK’S functional release target is **0.2.6**. Do not bump the Expo package version merely for documentation; version changes should accompany the actual 0.2.6 implementation/release gate.
+The Expo workspace is now **0.2.6 candidate** (Android versionCode 3). This is not a release-ready build: native forwarding, durable consent UI integration, migration application, and full acceptance tests remain release gates.
 
 ---
 

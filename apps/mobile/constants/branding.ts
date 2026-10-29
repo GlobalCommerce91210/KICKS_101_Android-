@@ -32,6 +32,6 @@ export const BRAND_MANIFEST: BrandAssetManifest = {
     }
   },
   altText: "KICK’S orange and gold mascot with blue eyes and glowing data rings",
-  minimumAppVersion: "0.2.5",
+  minimumAppVersion: "0.2.6",
   updatedAt: "2026-09-15T14:00:00Z"
 };
