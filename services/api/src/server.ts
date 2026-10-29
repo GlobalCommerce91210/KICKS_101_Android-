@@ -49,7 +49,7 @@ export function buildServer(options:{store?:Store;adminSecret?:string;intelligen
   const collectorAuth=options.collectorAuthorization??new CollectorAuthorizationService(undefined);
   const syntheticAllowed=options.allowSyntheticDevelopmentEvents===true&&process.env.NODE_ENV!=='production';
   const auditDenied=(operation:string,deviceId:string,result:CollectorAuthorizationResult,observations:number,log:{warn:(o:object,m:string)=>void})=>{const entry:CollectorAuditEntry={at:new Date().toISOString(),operation,deviceId,state:result.state,reason:result.reason,observations};store.collectorAudit.push(entry);if(store.collectorAudit.length>1000)store.collectorAudit.shift();log.warn(entry,'collector authorization denied')};
-  const denyStatus=(result:CollectorAuthorizationResult)=>result.reason==='authoritative_evidence_unavailable'?503:403;
+  const denyStatus=(result:CollectorAuthorizationResult)=>result.state==='BLOCKED_SERVICE_UNAVAILABLE'?503:403;
   const sendDenied=(r:{header:(k:string,v:string)=>unknown;code:(n:number)=>{send:(b:unknown)=>unknown}},result:CollectorAuthorizationResult)=>{const status=denyStatus(result);if(status===503)r.header('retry-after','1');return r.code(status).send({error:status===503?'collector_authorization_unavailable':'collector_not_authorized',state:result.state,eligible:false})};
   const stopCollectors=(subjectId:string,deviceId?:string)=>{collectorAuth.revokeAllForSubject(subjectId);if(deviceId)collectorAuth.revokeAllForDevice(deviceId);try{options.onCollectorStop?.(subjectId)}catch{}};
   app.register(cors,{origin:true});

@@ -88,6 +88,10 @@ test('eligibility is informational and ingestion reauthorizes separately', async
   };
   const ingestion = await app.inject({ method: 'POST', url: '/v1/metadata-batches', headers, payload: batch });
   assert.equal(ingestion.statusCode, 503);
+  assert.deepEqual(ingestion.json(), { error: 'collector_authorization_unavailable', state: 'BLOCKED_SERVICE_UNAVAILABLE', eligible: false });
+  assert.equal(store.collectorAudit.length, 1);
+  assert.equal(store.collectorAudit[0]!.state, 'BLOCKED_SERVICE_UNAVAILABLE');
+  assert.equal(store.collectorAudit[0]!.reason, 'authoritative_evidence_provider_missing');
   assert.equal(store.observations.length, 0);
 
   await app.close();

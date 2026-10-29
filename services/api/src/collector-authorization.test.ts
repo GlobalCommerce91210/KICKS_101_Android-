@@ -141,8 +141,12 @@ test('metadata ingestion fails closed with no or unavailable authorization depen
   const none = await setup(undefined);
   const permissionId = randomUUID();
   await grant(none.app, none.headers, permissionId);
-  assert.equal((await none.app.inject({ method: 'POST', url: '/v1/metadata-batches', headers: none.headers, payload: batchOf(permissionId) })).statusCode, 403);
+  const unavailable = await none.app.inject({ method: 'POST', url: '/v1/metadata-batches', headers: none.headers, payload: batchOf(permissionId) });
+  assert.equal(unavailable.statusCode, 503);
+  assert.deepEqual(unavailable.json(), { error: 'collector_authorization_unavailable', state: 'BLOCKED_SERVICE_UNAVAILABLE', eligible: false });
   assert.equal(none.store.observations.length, 0);
+  assert.equal(none.store.collectorAudit[0]!.state, 'BLOCKED_SERVICE_UNAVAILABLE');
+  assert.equal(none.store.collectorAudit[0]!.reason, 'authoritative_evidence_provider_missing');
   const down = await setup(new CollectorAuthorizationService({ loadEvidence: async () => { throw new Error('down'); } }));
   await grant(down.app, down.headers, permissionId);
   const res = await down.app.inject({ method: 'POST', url: '/v1/metadata-batches', headers: down.headers, payload: batchOf(permissionId) });
@@ -208,13 +212,16 @@ test('consent revocation invalidates authorization immediately and notifies coll
   assert.equal(store.observations.length, 1);
 });
 
-test('collector eligibility is sanitized and blocked without verified proof', async () => {
+test('collector eligibility remains informational without verified proof', async () => {
   const { app, headers } = await setup(simulatedAuth({ proofStatus: 'PENDING' }));
   const permissionId = randomUUID();
   await grant(app, headers, permissionId);
   const res = await app.inject({ method: 'POST', url: '/v1/collector/eligibility', headers, payload: { permissionId, purpose, activationRequested: true } });
-  assert.equal(res.statusCode, 403);
-  assert.deepEqual(res.json(), { error: 'collector_not_authorized', state: 'BLOCKED_STAMP_PENDING', eligible: false });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().eligible, true);
+  assert.equal(res.json().state, 'ELIGIBLE');
+  assert.equal(res.json().authorizationId, undefined);
+  assert.equal(res.json().expiresAt, undefined);
   const ok = await setup(simulatedAuth());
   await grant(ok.app, ok.headers, permissionId);
   const okRes = await ok.app.inject({ method: 'POST', url: '/v1/collector/eligibility', headers: ok.headers, payload: { permissionId, purpose, activationRequested: true } });
@@ -246,7 +253,9 @@ test('intelligence events: synthetic fixtures are disabled by default and in pro
   const permissionId = randomUUID();
   const denied = await setup(undefined, { allowSyntheticDevelopmentEvents: true });
   const consentHeaders = { ...denied.headers, 'x-kicks-consent-id': permissionId, 'x-kicks-consent-purpose': purpose };
-  assert.equal((await denied.app.inject({ method: 'POST', url: '/v1/intelligence/events', headers: consentHeaders, payload: telemetry(denied.deviceId) })).statusCode, 403);
+  const unavailableEvent = await denied.app.inject({ method: 'POST', url: '/v1/intelligence/events', headers: consentHeaders, payload: telemetry(denied.deviceId) });
+  assert.equal(unavailableEvent.statusCode, 503);
+  assert.deepEqual(unavailableEvent.json(), { error: 'collector_authorization_unavailable', state: 'BLOCKED_SERVICE_UNAVAILABLE', eligible: false });
   assert.equal((await denied.app.inject({ method: 'POST', url: '/v1/intelligence/events', headers: denied.headers, payload: telemetry(denied.deviceId) })).statusCode, 403);
 
   const allowed = await setup(simulatedAuth());
