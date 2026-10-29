@@ -59,7 +59,7 @@ export class PostgresCollectorEvidenceProvider implements CollectorEvidenceProvi
     const receipt = c ? await db.query<{ id: string; permission_id: string; decision_version: string; subject_id: string }>(
       'SELECT id, permission_id, decision_version, subject_id FROM consent_receipts WHERE consent_event_id = $1', [c.id]) : { rows: [] };
     const r = receipt.rows[0];
-    const verification = r ? await db.query<{ result: string; chain_id: string; proof_chain_id: string; finality_reached: boolean; provider_quorum: number; verifier_id: string; stamper: string; proof_receipt_id: string }>(
+    const verification = r ? await db.query<{ result: string; receipt_id: string; chain_id: string; proof_chain_id: string; finality_reached: boolean; provider_quorum: number; verifier_id: string; stamper: string; proof_receipt_id: string }>(
       `SELECT v.result, v.receipt_id, v.chain_id, p.receipt_id AS proof_receipt_id, p.chain_id AS proof_chain_id, v.finality_reached, v.provider_quorum, v.verifier_id, p.submitted_by AS stamper
          FROM proof_verifications v JOIN chain_proofs p ON p.id = v.chain_proof_id
         WHERE p.receipt_id = $1 ORDER BY v.verified_at DESC, v.id DESC LIMIT 1`, [r.id]) : { rows: [] };
