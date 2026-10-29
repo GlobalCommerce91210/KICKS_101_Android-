@@ -53,6 +53,9 @@ test('eligibility is informational and ingestion reauthorizes separately', async
   assert.equal(eligibilityBody.purpose, purpose);
   assert.equal(eligibilityBody.activationRequested, true);
   assert.equal(eligibilityBody.monitoringDefaultOn, false);
+  assert.deepEqual(Object.keys(eligibilityBody).sort(), [
+    'activationRequested', 'deviceId', 'eligible', 'monitoringDefaultOn', 'permissionId', 'purpose', 'state'
+  ]);
   assert.equal('expiresAt' in eligibilityBody, false);
 
   const extraField = await app.inject({

@@ -92,7 +92,7 @@ test('PostgreSQL evidence provider authorizes only with complete independently v
       [receipt3, event3, permission3, subject, createHash('sha256').update(event3).digest('hex'), event3]);
     const proof3 = randomUUID();
     await pool.query("INSERT INTO chain_proofs (id, receipt_id, chain_id, status, submitted_by) VALUES ($1,$2,$3,'PENDING','stamper-3')", [proof3, receipt3, CHAIN]);
-    await pool.query('INSERT INTO proof_verifications (id, chain_proof_id, receipt_id, verifier_id, result, chain_id, finality_reached, provider_quorum) VALUES ($1,$2,$3,$4,'VERIFIED',$5,true,2)',
+    await pool.query(`INSERT INTO proof_verifications (id, chain_proof_id, receipt_id, verifier_id, result, chain_id, finality_reached, provider_quorum) VALUES ($1,$2,$3,$4,'VERIFIED',$5,true,2)`,
       [randomUUID(), proof3, receipt2, 'verifier-3', CHAIN]);
     const req3 = { ...req, consentScope: permission3 };
     assert.equal((await svc.authorizeCollector(req3)).state, 'BLOCKED_VERIFICATION_FAILED');
