@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activateIosCollector, verifiedCollectorConnection } from './iosCollectorActivation.mjs';
+import { activateIosCollector, verifiedCollectorConnection, verifiedCollectorStopped } from './iosCollectorActivation.mjs';
 function fixture() {
   const calls = []; let consent = null; let subject = 'account-1';
   const policy = {permissionId:'permission-1',policyVersion:'v1',purposeVersion:'v1',purpose:'existing approved purpose'};
@@ -123,4 +123,77 @@ test('missing policy or activation cannot cause a lease request or VPN prompt', 
   const g = fixture(); g.deps.grantConsent = async () => { g.consent = { ...g.deps.policy, action:'grant', deviceId:'this-ipad', subjectId:'account-1' }; };
   await assert.rejects(activateIosCollector(g.deps), /could not be verified/);
   assert.ok(!g.calls.includes('ios_prompt'));
+});
+
+
+test('matching saved grant is never reused; fresh activation request is required', async () => {
+  const f = fixture(); const requests = [];
+  f.consent = { ...f.deps.policy, action:'grant', activationId:'old-activation', deviceId:'this-ipad', subjectId:'account-1' };
+  f.deps.newActivationRequestId = () => 'request-fresh-1';
+  f.deps.grantConsent = async (deviceId, requestId) => {
+    requests.push({ deviceId, requestId });
+    f.consent = { ...f.deps.policy, action:'grant', activationId:'new-activation', deviceId, subjectId:'account-1' };
+  };
+  f.deps.native.getStatus = async () => ({ deviceId:'this-ipad', permissionId:'permission-1', activationId:'new-activation', expiresAt:new Date(Date.now()+240_000).toISOString(), connected:true, consentVerified:true, collecting:true, lastAcceptedObservationAt:new Date().toISOString() });
+  await activateIosCollector(f.deps);
+  assert.deepEqual(requests, [{ deviceId:'this-ipad', requestId:'request-fresh-1' }]);
+});
+
+test('unchanged activation is denied before lease renewal or OS prompt', async () => {
+  const f = fixture(); f.consent = { ...f.deps.policy, action:'grant', activationId:'old-activation', deviceId:'this-ipad', subjectId:'account-1' };
+  f.deps.renewLease = async () => { f.calls.push('lease'); };
+  f.deps.grantConsent = async () => { f.calls.push('grant'); };
+  await assert.rejects(activateIosCollector(f.deps), /Fresh consent/);
+  assert.ok(!f.calls.includes('lease')); assert.ok(!f.calls.includes('ios_prompt')); assert.ok(!f.calls.includes('start'));
+});
+
+test('canceled restart does not submit a replacement grant', async () => {
+  const f = fixture(); f.consent = { ...f.deps.policy, action:'grant', activationId:'old-activation', deviceId:'this-ipad', subjectId:'account-1' };
+  f.deps.disclose = async () => false;
+  await assert.doesNotReject(async () => { assert.equal((await activateIosCollector(f.deps)).state, 'off'); });
+  assert.ok(!f.calls.includes('grant')); assert.ok(!f.calls.includes('ios_prompt'));
+});
+
+test('failed fresh grant has no saved-grant fallback', async () => {
+  const f = fixture(); f.consent = { ...f.deps.policy, action:'grant', activationId:'old-activation', deviceId:'this-ipad', subjectId:'account-1' };
+  f.deps.grantConsent = async () => { f.calls.push('grant_failed'); throw new Error('grant rejected'); };
+  await assert.rejects(activateIosCollector(f.deps), /grant rejected/);
+  assert.ok(!f.calls.includes('ios_prompt')); assert.ok(!f.calls.includes('start'));
+});
+
+test('lease renewal must preserve the fresh activation', async () => {
+  const f = fixture();
+  f.deps.grantConsent = async (deviceId) => { f.consent = { ...f.deps.policy, action:'grant', activationId:'fresh-activation', deviceId, subjectId:'account-1' }; };
+  f.deps.renewLease = async () => { f.consent = { ...f.consent, activationId:'different-activation' }; };
+  await assert.rejects(activateIosCollector(f.deps), /withdrawn or changed/);
+  assert.ok(!f.calls.includes('ios_prompt')); assert.ok(!f.calls.includes('start'));
+});
+
+test('successful stop and restart require distinct activations', async () => {
+  const f = fixture(); let generation = 0; let stopped = false; let latestActivation = null;
+  f.deps.grantConsent = async (deviceId) => {
+    generation += 1;
+    latestActivation = `activation-${generation}`;
+    f.consent = { ...f.deps.policy, action:'grant', activationId:latestActivation, deviceId, subjectId:'account-1' };
+  };
+  f.deps.native.getStatus = async () => stopped ? { connected:false, collecting:false } : {
+    deviceId:'this-ipad', permissionId:'permission-1', activationId:latestActivation,
+    expiresAt:new Date(Date.now()+240_000).toISOString(), connected:true, consentVerified:true,
+    collecting:true, lastAcceptedObservationAt:new Date().toISOString()
+  };
+  assert.equal((await activateIosCollector(f.deps)).state, 'collecting');
+  await f.deps.native.stop(); stopped = true;
+  assert.equal(verifiedCollectorStopped(await f.deps.native.getStatus()), true);
+  stopped = false;
+  assert.equal((await activateIosCollector(f.deps)).state, 'collecting');
+  assert.equal(generation, 2); assert.equal(latestActivation, 'activation-2');
+});
+
+test('incomplete or unavailable stop status remains unknown', () => {
+  for (const status of [null, {}, { connected:false }, { collecting:false },
+    { unavailableReason:'offline', connected:false, collecting:false },
+    { connected:true, collecting:false }, { connected:false, collecting:true }]) {
+    assert.equal(verifiedCollectorStopped(status), false);
+  }
+  assert.equal(verifiedCollectorStopped({ connected:false, collecting:false }), true);
 });
