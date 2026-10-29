@@ -3,7 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { Card, colors, ui } from './Brand';
 import { useSession } from './SessionProvider';
 import { useMonitoringPolicy } from './useMonitoringPolicy';
-import { shouldResetWebReview, webMonitoringContextKey, webMonitoringState, WEB_MONITORING_STATES } from '../services/webMonitoringState.mjs';
+import { createWebRequestGuard, shouldResetWebReview, webMonitoringContextKey, webMonitoringState, WEB_MONITORING_STATES } from '../services/webMonitoringState.mjs';
 
 type OwnedDevice = {
   device_id: string;
@@ -33,12 +33,25 @@ export function WebMonitoringControls() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const previousContext = useRef('');
+  const requestGuard = useRef(createWebRequestGuard());
+  const deviceIdRef = useRef('');
+  const busyRef = useRef(false);
+  const policyRef = useRef(policy);
+  policyRef.current = policy;
+  const sessionGeneration = manager.sessionGeneration;
+  const requestContext = (selectedDevice = deviceIdRef.current) => ({
+    sessionGeneration: manager.sessionGeneration,
+    accountSubjectId: manager.user?.subjectId ?? null,
+    deviceId: selectedDevice || null,
+    policy: policyRef.current,
+  });
 
   const contextKey = useMemo(() => webMonitoringContextKey({
+    sessionGeneration,
     accountSubjectId: user?.subjectId,
     deviceId,
     policy,
-  }), [user?.subjectId, deviceId, policy.permissionId, policy.policyVersion, policy.purposeVersion, policy.purpose]);
+  }), [sessionGeneration, user?.subjectId, deviceId, policy.permissionId, policy.policyVersion, policy.purposeVersion, policy.purpose]);
   useEffect(() => {
     if (shouldResetWebReview(previousContext.current, contextKey)) setFreshReview(false);
     previousContext.current = contextKey;
@@ -46,44 +59,60 @@ export function WebMonitoringControls() {
 
   useEffect(() => {
     let live = true;
+    deviceIdRef.current = '';
     setFreshReview(false); setConsent(null); setDevices([]); setDeviceId(''); setError(null);
-    if (!ready || !user) { setLoading(false); return () => { live = false; }; }
+    const initialRequest = requestGuard.current.begin(requestContext(''));
+    let activeRequest = initialRequest;
+    const isCurrent = (request: typeof initialRequest) => live && requestGuard.current.isCurrent(request, requestContext());
+    if (!ready || !user) { setLoading(false); return () => { live = false; requestGuard.current.invalidate(); }; }
     setLoading(true);
     void (async () => {
       try {
         const response = await manager.request('/core/consumer/v1/devices');
+        if (!isCurrent(initialRequest)) return;
         if (!response.ok) throw new Error('Owned devices could not be confirmed.');
         const result = await response.json();
+        if (!isCurrent(initialRequest)) return;
         const list: OwnedDevice[] = Array.isArray(result.devices) ? result.devices : [];
-        if (!live) return;
         setDevices(list);
         const selected = list[0]?.device_id ?? '';
+        deviceIdRef.current = selected;
         setDeviceId(selected);
         if (selected && configured) {
-          const consentResponse = await manager.request('/core/consumer/v1/devices/' + encodeURIComponent(selected) + '/consent?permissionId=' + encodeURIComponent(policy.permissionId));
+          activeRequest = requestGuard.current.snapshot(requestContext(selected), initialRequest.nonce);
+          const consentResponse = await manager.request('/core/consumer/v1/devices/' + encodeURIComponent(selected) + '/consent?permissionId=' + encodeURIComponent(policyRef.current.permissionId));
+          if (!isCurrent(activeRequest)) return;
           if (!consentResponse.ok) throw new Error('Saved permission could not be confirmed.');
           const body = await consentResponse.json();
-          if (live) setConsent(body.consent ?? null);
+          if (!isCurrent(activeRequest)) return;
+          setConsent(body.consent ?? null);
         }
       } catch (failure) {
-        if (live) setError(failure instanceof Error ? failure.message : 'Owned device state is unknown.');
-      } finally { if (live) setLoading(false); }
+        if (isCurrent(activeRequest)) setError(failure instanceof Error ? failure.message : 'Owned device state is unknown.');
+      } finally { if (isCurrent(activeRequest)) setLoading(false); }
     })();
-    return () => { live = false; };
-  }, [ready, user?.subjectId, configured, policy.permissionId, policy.policyVersion, policy.purposeVersion, policy.purpose]);
+    return () => { live = false; requestGuard.current.invalidate(); };
+  }, [ready, user?.subjectId, sessionGeneration, configured, policy.permissionId, policy.policyVersion, policy.purposeVersion, policy.purpose]);
+
+  useEffect(() => () => { requestGuard.current.cleanup(); }, []);
 
   const selectDevice = async (id: string) => {
-    if (busy || id === deviceId) return;
+    if (busyRef.current || id === deviceIdRef.current) return;
+    deviceIdRef.current = id;
     setDeviceId(id); setFreshReview(false); setConsent(null); setError(null);
+    const request = requestGuard.current.begin(requestContext(id));
+    const isCurrent = () => requestGuard.current.isCurrent(request, requestContext(id));
     if (!configured) return;
-    setBusy(true);
+    busyRef.current = true; setBusy(true);
     try {
-      const response = await manager.request('/core/consumer/v1/devices/' + encodeURIComponent(id) + '/consent?permissionId=' + encodeURIComponent(policy.permissionId));
+      const response = await manager.request('/core/consumer/v1/devices/' + encodeURIComponent(id) + '/consent?permissionId=' + encodeURIComponent(policyRef.current.permissionId));
+      if (!isCurrent()) return;
       if (!response.ok) throw new Error('Saved permission could not be confirmed.');
       const body = await response.json();
+      if (!isCurrent()) return;
       setConsent(body.consent ?? null);
-    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Selected device state is unknown.'); }
-    finally { setBusy(false); }
+    } catch (failure) { if (isCurrent()) setError(failure instanceof Error ? failure.message : 'Selected device state is unknown.'); }
+    finally { if (isCurrent()) { busyRef.current = false; setBusy(false); } }
   };
 
   const accountSubjectId = user?.subjectId ?? null;
