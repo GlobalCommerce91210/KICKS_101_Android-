@@ -50,9 +50,13 @@ class BoundedQueue(
     pending.addLast(o)
   }
 
-  /** Returns the same batch until it is acknowledged or discarded. */
+  /** Returns a batch only after its identity and contents are durably persisted. */
   @Synchronized fun peekBatch(): Batch? {
-    inFlight?.let { return it }
+    inFlight?.let {
+      // A prior save may have failed after inFlight was assigned. Retry durability before exposing it.
+      persist()
+      return it
+    }
     if (pending.isEmpty()) return null
     val items = ArrayList<Observation>()
     while (items.size < maxBatch && pending.isNotEmpty()) items.add(pending.removeFirst())
