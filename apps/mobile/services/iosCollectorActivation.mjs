@@ -1,8 +1,15 @@
 export class CollectorActivationError extends Error {}
+class CollectorActivationCanceledError extends CollectorActivationError {}
 
-export function verifiedCollectorStopped(status) {
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export function isCanonicalUuid(value) { return typeof value === 'string' && UUID_PATTERN.test(value); }
+export function isCompleteCollectorStatus(status) {
   return !!status && status.unavailableReason == null &&
-    status.connected === false && status.collecting === false;
+    typeof status.connected === 'boolean' && typeof status.collecting === 'boolean' &&
+    typeof status.consentVerified === 'boolean';
+}
+export function verifiedCollectorStopped(status) {
+  return isCompleteCollectorStatus(status) && status.connected === false && status.collecting === false;
 }
 
 export function verifiedCollectorConnection(status, consent, now = Date.now()) {
@@ -23,6 +30,7 @@ export async function activateIosCollector(deps) {
   }
   if (!await deps.disclose()) return { state: 'off', reason: 'disclosure_canceled' };
   const current = () => {
+    if (deps.isCanceled?.()) throw new CollectorActivationCanceledError('Collector start canceled. Monitoring remains off.');
     if (deps.subject() !== subject) throw new CollectorActivationError('Your account changed. Monitoring remains off.');
   };
   current();
@@ -30,7 +38,9 @@ export async function activateIosCollector(deps) {
   let started = false;
   try {
     const capability = await deps.native.getStatus(); current();
-    if (capability?.unavailableReason) throw new CollectorActivationError(capability.unavailableReason);
+    if (!isCompleteCollectorStatus(capability)) {
+      throw new CollectorActivationError(capability?.unavailableReason ?? 'Native collector status is unavailable or incomplete. Monitoring remains off.');
+    }
     if (deps.provision) { await deps.provision(); current(); }
     const deviceId = await deps.native.getDeviceId();
     current();
@@ -45,8 +55,10 @@ export async function activateIosCollector(deps) {
     // Every Start/Restart must submit a fresh, explicit grant. A matching saved
     // record is input for replay detection only; it is never reused as proof.
     const priorActivationId = consent?.activationId ?? null;
-    const activationRequestId = deps.newActivationRequestId?.() ??
-      globalThis.crypto?.randomUUID?.() ?? `activation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const activationRequestId = deps.newActivationRequestId?.() ?? globalThis.crypto?.randomUUID?.();
+    if (!isCanonicalUuid(activationRequestId)) {
+      throw new CollectorActivationError('A valid activation request ID is unavailable. Monitoring remains off.');
+    }
     await deps.grantConsent(deviceId, activationRequestId); current();
     consent = await deps.readConsent(deviceId); current();
     if (!matches(consent) || !consent.activationId ||
@@ -66,6 +78,7 @@ export async function activateIosCollector(deps) {
     consent = await deps.readConsent(deviceId); current();
     if (!matches(consent) || consent.activationId !== activationId) throw new CollectorActivationError('Permission was withdrawn or changed. Monitoring remains off.');
     const startedAt = Date.now();
+    current();
     started = true;
     await deps.native.start(); current();
     deps.onState('connecting');
@@ -78,7 +91,9 @@ export async function activateIosCollector(deps) {
       if (!matches(consent) || consent.activationId !== activationId) {
         throw new CollectorActivationError('Permission was withdrawn or changed. Monitoring was stopped.');
       }
-      if (status?.unavailableReason) throw new CollectorActivationError(status.unavailableReason);
+      if (!isCompleteCollectorStatus(status)) {
+        throw new CollectorActivationError(status?.unavailableReason ?? 'Native collector status is unavailable or incomplete. Monitoring was stopped.');
+      }
       if (verifiedCollectorConnection(status, consent)) break;
       if ((status?.deviceId && status.deviceId !== deviceId) ||
           (status?.permissionId && status.permissionId !== deps.policy.permissionId) ||
@@ -97,6 +112,7 @@ export async function activateIosCollector(deps) {
     deps.onState('collecting');
     return { state: 'collecting' };
   } catch (error) {
+    const canceled = error instanceof CollectorActivationCanceledError;
     if (started) {
       try {
         await deps.native.stop();
@@ -104,7 +120,9 @@ export async function activateIosCollector(deps) {
         if (!verifiedCollectorStopped(stopped)) throw new Error('unconfirmed');
       }
       catch { throw new CollectorActivationError('Collector stop could not be confirmed. Turn off KICK’S VPN in iOS Settings.'); }
+      if (canceled) return { state: 'off', reason: 'start_canceled_after_cleanup' };
     }
+    if (canceled) return { state: 'off', reason: 'start_canceled' };
     throw error;
   }
 }
