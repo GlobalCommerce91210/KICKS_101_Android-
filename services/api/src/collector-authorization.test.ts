@@ -222,6 +222,27 @@ test('collector eligibility is sanitized and blocked without verified proof', as
   assert.equal(okRes.json().authorizationId, undefined);
 });
 
+
+test('eligibility POST is informational, frozen-body strict, and GET is deny-only', async () => {
+  const { app, headers } = await setup(simulatedAuth());
+  const permissionId = randomUUID();
+  await grant(app, headers, permissionId);
+  const base = { permissionId, purpose, activationRequested: true };
+  const ok = await app.inject({ method: 'POST', url: '/v1/collector/eligibility', headers, payload: base });
+  assert.equal(ok.statusCode, 200);
+  assert.equal(ok.json().authorizationId, undefined);
+  assert.equal(ok.json().monitoringDefaultOn, false);
+  assert.equal(typeof ok.json().decisionVersion, 'string');
+  assert.equal(ok.json().policyVersion, 'p1');
+  assert.equal(ok.json().purposeVersion, 'v1');
+  const extra = await app.inject({ method: 'POST', url: '/v1/collector/eligibility', headers, payload: { ...base, study: 'not-a-contract-field' } });
+  assert.equal(extra.statusCode, 400);
+  const get = await app.inject({ method: 'GET', url: `/v1/collector/eligibility?permissionId=${permissionId}`, headers });
+  assert.equal(get.statusCode, 410);
+  assert.deepEqual(get.json(), { eligible: false, error: 'deprecated_route', reason: 'GET eligibility cannot authorize collection' });
+  await app.close();
+});
+
 const telemetry = (deviceId: string) => ({
   event_id: randomUUID(), timestamp: new Date().toISOString(), app_id: 'com.retail.shop', device_id: deviceId,
   network: { domain: 'analytics.adservice.net', endpoint: '/t', method: 'POST', status_code: 200 }

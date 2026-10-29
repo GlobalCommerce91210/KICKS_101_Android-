@@ -95,6 +95,19 @@ export class CollectorAuthorizationService {
     private readonly now: () => number = () => Date.now()
   ) {}
 
+  /** Informational eligibility evaluation. This never issues an activation capability. */
+  async evaluateEligibility(request: CollectorAuthorizationRequest, transaction?: unknown): Promise<CollectorAuthorizationResult> {
+    const evaluated = await this.evaluate(request, transaction);
+    if (!evaluated.evidence) return evaluated.result;
+    const evidence = evaluated.evidence;
+    const expiresAt = Math.min(this.now() + this.ttlMs, evidence.expiresAt);
+    return {
+      ...evaluated.result,
+      expiresAt: new Date(expiresAt).toISOString(),
+      decisionVersion: evidence.decisionVersion
+    };
+  }
+
   async authorizeCollector(request: CollectorAuthorizationRequest, transaction?: unknown): Promise<CollectorAuthorizationResult> {
     const evaluated = await this.evaluate(request, transaction);
     if (!evaluated.evidence) return evaluated.result;
