@@ -1,5 +1,10 @@
 export class CollectorActivationError extends Error {}
 
+export function verifiedCollectorStopped(status) {
+  return !!status && status.unavailableReason == null &&
+    status.connected === false && status.collecting === false;
+}
+
 export function verifiedCollectorConnection(status, consent, now = Date.now()) {
   const expiry = Date.parse(status?.expiresAt ?? '');
   return !!consent?.activationId && status?.connected === true && status.consentVerified === true &&
@@ -37,17 +42,23 @@ export async function activateIosCollector(deps) {
       value.subjectId === subject && value.permissionId === deps.policy.permissionId &&
       value.policyVersion === deps.policy.policyVersion && value.purposeVersion === deps.policy.purposeVersion &&
       value.purpose === deps.policy.purpose;
-    if (!matches(consent)) {
-      await deps.grantConsent(deviceId); current();
-      consent = await deps.readConsent(deviceId); current();
+    // Every Start/Restart must submit a fresh, explicit grant. A matching saved
+    // record is input for replay detection only; it is never reused as proof.
+    const priorActivationId = consent?.activationId ?? null;
+    const activationRequestId = deps.newActivationRequestId?.() ??
+      globalThis.crypto?.randomUUID?.() ?? `activation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    await deps.grantConsent(deviceId, activationRequestId); current();
+    consent = await deps.readConsent(deviceId); current();
+    if (!matches(consent) || !consent.activationId ||
+        (priorActivationId && consent.activationId === priorActivationId)) {
+      throw new CollectorActivationError('Fresh consent could not be verified. Monitoring remains off.');
     }
-    if (!matches(consent) || !consent.activationId) throw new CollectorActivationError('Saved consent could not be verified. Monitoring remains off.');
+    const activationId = consent.activationId;
     if (deps.renewLease) {
       await deps.renewLease(); current();
       consent = await deps.readConsent(deviceId); current();
-      if (!matches(consent) || !consent.activationId) throw new CollectorActivationError('Permission was withdrawn. Monitoring remains off.');
+      if (!matches(consent) || consent.activationId !== activationId) throw new CollectorActivationError('Permission was withdrawn or changed. Monitoring remains off.');
     }
-    const activationId = consent.activationId;
     deps.onState('vpn_authorization');
     const authorization = await deps.native.requestAuthorization(); current();
     if (authorization !== 'authorized') return { state: 'off', reason: 'vpn_not_authorized' };
@@ -90,7 +101,7 @@ export async function activateIosCollector(deps) {
       try {
         await deps.native.stop();
         const stopped = await deps.native.getStatus();
-        if (!stopped || stopped.connected !== false || stopped.collecting !== false) throw new Error('unconfirmed');
+        if (!verifiedCollectorStopped(stopped)) throw new Error('unconfirmed');
       }
       catch { throw new CollectorActivationError('Collector stop could not be confirmed. Turn off KICK’S VPN in iOS Settings.'); }
     }
