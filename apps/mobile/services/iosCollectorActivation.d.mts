@@ -9,8 +9,9 @@ export interface IosCollectorNative {
   requestAuthorization(): Promise<string>;
   start(): Promise<void>;
   stop(): Promise<void>;
-  getStatus(): Promise<{deviceId?: string; permissionId?: string; activationId?: string; expiresAt?: string; connectionState?: string; connected: boolean; consentVerified: boolean; collecting: boolean; lastAcceptedObservationAt?: string; unavailableReason?: string}>;
+  getStatus(): Promise<{deviceId?: string; permissionId?: string; activationId?: string; expiresAt?: string; connectionState?: string; connected?: boolean; consentVerified?: boolean; collecting?: boolean; lastAcceptedObservationAt?: string; unavailableReason?: string}>;
 }
+export function verifiedCollectorStopped(status: Awaited<ReturnType<IosCollectorNative['getStatus']>> | null | undefined): boolean;
 export function verifiedCollectorConnection(status: Awaited<ReturnType<IosCollectorNative['getStatus']>>, consent: BoundCollectorConsent | null, now?: number): boolean;
 export function activateIosCollector(deps: {
   subject(): string | null;
@@ -20,7 +21,8 @@ export function activateIosCollector(deps: {
   native?: IosCollectorNative;
   policy: CollectorPolicy;
   readConsent(deviceId: string): Promise<BoundCollectorConsent | null>;
-  grantConsent(deviceId: string): Promise<void>;
+  newActivationRequestId?(): string;
+  grantConsent(deviceId: string, activationRequestId: string): Promise<void>;
   onState(state: string): void;
   wait?(milliseconds: number): Promise<void>;
 }): Promise<{state: string; reason?: string}>;
