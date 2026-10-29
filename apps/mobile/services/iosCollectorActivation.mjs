@@ -11,6 +11,9 @@ export function isCompleteCollectorStatus(status) {
 export function verifiedCollectorStopped(status) {
   return isCompleteCollectorStatus(status) && status.connected === false && status.collecting === false;
 }
+function hasActiveCollectorConnection(status) {
+  return isCompleteCollectorStatus(status) && (status.connected === true || status.collecting === true);
+}
 
 export function verifiedCollectorConnection(status, consent, now = Date.now()) {
   const expiry = Date.parse(status?.expiresAt ?? '');
@@ -36,11 +39,15 @@ export async function activateIosCollector(deps) {
   current();
   if (!deps.native) throw new CollectorActivationError('This build does not include the iOS collector. Monitoring remains off.');
   let started = false;
+  let initialStatus = null;
   try {
     const capability = await deps.native.getStatus(); current();
     if (!isCompleteCollectorStatus(capability)) {
       throw new CollectorActivationError(capability?.unavailableReason ?? 'Native collector status is unavailable or incomplete. Monitoring remains off.');
     }
+    // Preserve the complete pre-start snapshot: a canceled start may have an
+    // already-active tunnel that must be stopped and strictly verified.
+    initialStatus = capability;
     if (deps.provision) { await deps.provision(); current(); }
     const deviceId = await deps.native.getDeviceId();
     current();
@@ -113,14 +120,17 @@ export async function activateIosCollector(deps) {
     return { state: 'collecting' };
   } catch (error) {
     const canceled = error instanceof CollectorActivationCanceledError;
-    if (started) {
+    const activeBeforeStart = hasActiveCollectorConnection(initialStatus);
+    if (started || (canceled && activeBeforeStart)) {
       try {
         await deps.native.stop();
         const stopped = await deps.native.getStatus();
         if (!verifiedCollectorStopped(stopped)) throw new Error('unconfirmed');
       }
       catch { throw new CollectorActivationError('Collector stop could not be confirmed. Turn off KICK’S VPN in iOS Settings.'); }
-      if (canceled) return { state: 'off', reason: 'start_canceled_after_cleanup' };
+      if (canceled) {
+        return { state: 'off', reason: started ? 'start_canceled_after_cleanup' : 'start_canceled_existing_tunnel_after_cleanup' };
+      }
     }
     if (canceled) return { state: 'off', reason: 'start_canceled' };
     throw error;
