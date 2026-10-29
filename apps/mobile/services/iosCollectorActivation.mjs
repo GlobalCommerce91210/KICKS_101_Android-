@@ -14,6 +14,16 @@ export function verifiedCollectorStopped(status) {
 function hasActiveCollectorConnection(status) {
   return isCompleteCollectorStatus(status) && (status.connected === true || status.collecting === true);
 }
+export function collectorControlAction(state, startInFlight = false) {
+  return startInFlight || state !== 'off' ? 'stop' : 'start';
+}
+export async function stopCollectorAndVerify(native) {
+  if (!native) throw new CollectorActivationError('The native collector is unavailable; stop state cannot be confirmed.');
+  await native.stop();
+  const stopped = await native.getStatus();
+  if (!verifiedCollectorStopped(stopped)) throw new CollectorActivationError('Collector stop could not be confirmed. Turn off KICK’S VPN in iOS Settings.');
+  return stopped;
+}
 
 export function verifiedCollectorConnection(status, consent, now = Date.now()) {
   const expiry = Date.parse(status?.expiresAt ?? '');
@@ -123,9 +133,7 @@ export async function activateIosCollector(deps) {
     const activeBeforeStart = hasActiveCollectorConnection(initialStatus);
     if (started || (canceled && activeBeforeStart)) {
       try {
-        await deps.native.stop();
-        const stopped = await deps.native.getStatus();
-        if (!verifiedCollectorStopped(stopped)) throw new Error('unconfirmed');
+        await stopCollectorAndVerify(deps.native);
       }
       catch { throw new CollectorActivationError('Collector stop could not be confirmed. Turn off KICK’S VPN in iOS Settings.'); }
       if (canceled) {
