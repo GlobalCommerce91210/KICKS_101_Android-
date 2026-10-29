@@ -105,7 +105,7 @@ class BufferAndMidFlightLossTest {
   }
 
   @Test fun consentRevokedMidFlightStopsAndPurgesWithoutUpload() {
-    val h = Harness(); h.startOk()
+    val h = Harness(worker = false); h.startOk()
     h.controller.onDns("a.example", 1)
     h.clock.now += 31_000  // buffer cache stale -> authoritative re-check
     h.authority.result = okResponse(consent = "revoked")
