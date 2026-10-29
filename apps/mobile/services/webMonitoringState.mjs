@@ -22,6 +22,12 @@ export function createWebRequestGuard() {
   };
 }
 
+export function supersedeWebRequest({ guard, busyRef, setBusy }) {
+  guard.invalidate();
+  busyRef.current = false;
+  setBusy(false);
+}
+
 export function webMonitoringState({ accountSubjectId, deviceId, policyConfigured, freshReview, browserCommandAvailable = false }) {
   if (!accountSubjectId) return WEB_MONITORING_STATES.sign_in_required;
   if (!policyConfigured) return WEB_MONITORING_STATES.policy_unavailable;
