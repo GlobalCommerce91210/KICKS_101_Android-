@@ -15,7 +15,7 @@ export function isCanonicalUuid(value: unknown): value is string;
 export function isCompleteCollectorStatus(status: Awaited<ReturnType<IosCollectorNative['getStatus']>> | null | undefined): boolean;
 export function verifiedCollectorStopped(status: Awaited<ReturnType<IosCollectorNative['getStatus']>> | null | undefined): boolean;
 export function collectorControlAction(state: string, startInFlight?: boolean): 'start' | 'stop';
-export function stopCollectorAndVerify(native: IosCollectorNative | undefined): Promise<Awaited<ReturnType<IosCollectorNative['getStatus']>>;
+export function stopCollectorAndVerify(native: IosCollectorNative | undefined): Promise<Awaited<ReturnType<IosCollectorNative['getStatus']>>>;
 export function verifiedCollectorConnection(status: Awaited<ReturnType<IosCollectorNative['getStatus']>>, consent: BoundCollectorConsent | null, now?: number): boolean;
 export function activateIosCollector(deps: {
   subject(): string | null;
