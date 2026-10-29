@@ -73,13 +73,15 @@ class UploadPump(
 
 /** Single daemon thread. [stop] wakes it immediately and [join] guarantees it has exited. */
 class UploadWorker(private val step: () -> PumpResult, private val onHalt: (Reason) -> Unit, private val idleMs: Long = 15_000) {
-  private val stopSignal = CountDownLatch(1)
+  private var stopSignal: CountDownLatch? = null
   private var thread: Thread? = null
 
   @Synchronized fun start() {
-    if (thread != null) return
+    if (thread?.isAlive == true) return
+    val signal = CountDownLatch(1)
+    stopSignal = signal
     thread = Thread({
-      while (stopSignal.count > 0) {
+      while (signal.count > 0) {
         val wait = try {
           when (val r = step()) {
             is PumpResult.Halted -> { onHalt(r.reason); return@Thread }
@@ -88,11 +90,11 @@ class UploadWorker(private val step: () -> PumpResult, private val onHalt: (Reas
             PumpResult.Idle -> idleMs
           }
         } catch (e: Exception) { idleMs }
-        if (wait > 0 && stopSignal.await(wait, TimeUnit.MILLISECONDS)) return@Thread
+        if (wait > 0 && signal.await(wait, TimeUnit.MILLISECONDS)) return@Thread
       }
     }, "kicks-upload").also { it.isDaemon = true; it.start() }
   }
 
-  fun stop() = stopSignal.countDown()
+  @Synchronized fun stop() { stopSignal?.countDown() }
   fun join(timeoutMs: Long): Boolean { val t = synchronized(this) { thread } ?: return true; if (t === Thread.currentThread()) return true; t.join(timeoutMs); return !t.isAlive }
 }
