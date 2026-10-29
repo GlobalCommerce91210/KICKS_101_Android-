@@ -166,12 +166,12 @@ class BufferAndMidFlightLossTest {
   }
 
   @Test fun userStopKeepsQueueButFailClosedStopPurges() {
-    val h = Harness(); h.startOk()
+    val h = Harness(worker = false); h.startOk()
     h.controller.onDns("a.example", 1)
     h.controller.explicitStop()
     assertEquals(1, h.queue.size())
     assertNotNull(h.store.load())
-    val h2 = Harness(); h2.startOk(); h2.controller.onDns("a.example", 1)
+    val h2 = Harness(worker = false); h2.startOk(); h2.controller.onDns("a.example", 1)
     h2.controller.stop(Reason.SESSION_REVOKED)
     assertEquals(0, h2.queue.size()); assertNull(h2.store.load())
   }
