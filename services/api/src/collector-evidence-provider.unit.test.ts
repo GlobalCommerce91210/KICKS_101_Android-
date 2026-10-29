@@ -52,7 +52,7 @@ function fakePool(overrides: RowOverrides = {}): Pool {
         : normalized.includes('from proof_verifications') ? rows.verification
         : normalized.includes('from chain_proofs') ? undefined
         : undefined;
-      return { rows: row ? [row as T] : [] };
+      return { rows: row ? [row as unknown as T] : [] };
     }
   };
   return pool as unknown as Pool;
@@ -72,6 +72,17 @@ async function denied(overrides: RowOverrides) {
   const provider = new PostgresCollectorEvidenceProvider(fakePool(overrides), { requiredChain: CHAIN });
   return new CollectorAuthorizationService(provider).authorizeCollector(request());
 }
+
+test('complete simulated evidence fixture authorizes before linkage mutations', async () => {
+  const provider = new PostgresCollectorEvidenceProvider(fakePool(), { requiredChain: CHAIN });
+  const result = await new CollectorAuthorizationService(provider).authorizeCollector(request());
+  assert.deepEqual({ eligible: result.eligible, state: result.state, reason: result.reason }, {
+    eligible: true,
+    state: 'ELIGIBLE',
+    reason: 'all_authoritative_checks_passed'
+  });
+  assert.ok(result.authorizationId);
+});
 
 test('simulated linkage guards deny an enrollment subject mismatch', async () => {
   const result = await denied({ epoch: { subject_id: SUBJECT }, device: { enrollment_subject_id: 'subject-other' } });
