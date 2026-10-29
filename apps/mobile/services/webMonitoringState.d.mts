@@ -11,5 +11,6 @@ export interface WebMonitoringRequestSnapshot { nonce: number; contextKey: strin
 export interface WebMonitoringRequestGuard { begin(context: WebMonitoringRequestContext): WebMonitoringRequestSnapshot; snapshot(context: WebMonitoringRequestContext, nonce: number): WebMonitoringRequestSnapshot; invalidate(): void; cleanup(): void; isCurrent(request: WebMonitoringRequestSnapshot, context: WebMonitoringRequestContext): boolean; }
 export function webMonitoringContextKey(input: WebMonitoringRequestContext): string;
 export function createWebRequestGuard(): WebMonitoringRequestGuard;
+export function supersedeWebRequest(input: { guard: WebMonitoringRequestGuard; busyRef: { current: boolean }; setBusy: (busy: boolean) => void }): void;
 export function webMonitoringState(input: { accountSubjectId?: string | null; deviceId?: string | null; policyConfigured: boolean; freshReview: boolean; browserCommandAvailable?: boolean }): typeof WEB_MONITORING_STATES[keyof typeof WEB_MONITORING_STATES];
 export function shouldResetWebReview(previousContextKey: string, nextContextKey: string): boolean;
