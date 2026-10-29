@@ -3,7 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { Card, colors, ui } from './Brand';
 import { useSession } from './SessionProvider';
 import { useMonitoringPolicy } from './useMonitoringPolicy';
-import { createWebRequestGuard, shouldResetWebReview, webMonitoringContextKey, webMonitoringState, WEB_MONITORING_STATES } from '../services/webMonitoringState.mjs';
+import { createWebRequestGuard, shouldResetWebReview, supersedeWebRequest, webMonitoringContextKey, webMonitoringState, WEB_MONITORING_STATES } from '../services/webMonitoringState.mjs';
 
 type OwnedDevice = {
   device_id: string;
@@ -45,6 +45,7 @@ export function WebMonitoringControls() {
     deviceId: selectedDevice || null,
     policy: policyRef.current,
   });
+  const supersedeRequest = () => supersedeWebRequest({ guard: requestGuard.current, busyRef, setBusy });
 
   const contextKey = useMemo(() => webMonitoringContextKey({
     sessionGeneration,
@@ -59,12 +60,13 @@ export function WebMonitoringControls() {
 
   useEffect(() => {
     let live = true;
+    supersedeRequest();
     deviceIdRef.current = '';
     setFreshReview(false); setConsent(null); setDevices([]); setDeviceId(''); setError(null);
     const initialRequest = requestGuard.current.begin(requestContext(''));
     let activeRequest = initialRequest;
     const isCurrent = (request: typeof initialRequest) => live && requestGuard.current.isCurrent(request, requestContext());
-    if (!ready || !user) { setLoading(false); return () => { live = false; requestGuard.current.invalidate(); }; }
+    if (!ready || !user) { supersedeRequest(); setLoading(false); return () => { live = false; supersedeRequest(); }; }
     setLoading(true);
     void (async () => {
       try {
@@ -91,10 +93,10 @@ export function WebMonitoringControls() {
         if (isCurrent(activeRequest)) setError(failure instanceof Error ? failure.message : 'Owned device state is unknown.');
       } finally { if (isCurrent(activeRequest)) setLoading(false); }
     })();
-    return () => { live = false; requestGuard.current.invalidate(); };
+    return () => { live = false; supersedeRequest(); };
   }, [ready, user?.subjectId, sessionGeneration, configured, policy.permissionId, policy.policyVersion, policy.purposeVersion, policy.purpose]);
 
-  useEffect(() => () => { requestGuard.current.cleanup(); }, []);
+  useEffect(() => () => { requestGuard.current.cleanup(); busyRef.current = false; }, []);
 
   const selectDevice = async (id: string) => {
     if (busyRef.current || id === deviceIdRef.current) return;
