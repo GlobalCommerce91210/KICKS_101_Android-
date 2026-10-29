@@ -23,7 +23,7 @@ class LogoutPurgeTest {
     assertNull(h.store.load())
 
     // Restart cannot replay stale observations and remains separately gated by session/activation.
-    assertEquals(Decision.Deny(Reason.NO_SESSION), h.controller.start { true })
+    assertEquals(Decision.Deny(Reason.NOT_EXPLICITLY_ACTIVATED), h.controller.start { true })
     assertEquals(0, h.queue.size())
     assertNull(h.store.load())
     assertTrue(h.uploader.batches.isEmpty())
