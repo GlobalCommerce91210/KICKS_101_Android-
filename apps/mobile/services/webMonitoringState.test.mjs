@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWebRequestGuard, WEB_MONITORING_STATES, shouldResetWebReview, webMonitoringContextKey, webMonitoringState } from './webMonitoringState.mjs';
+import { createWebRequestGuard, supersedeWebRequest, WEB_MONITORING_STATES, shouldResetWebReview, webMonitoringContextKey, webMonitoringState } from './webMonitoringState.mjs';
 
 const policy = { permissionId: 'permission-1', policyVersion: 'policy-1', purposeVersion: 'purpose-1', purpose: 'reviewed metadata monitoring' };
 const context = (overrides = {}) => ({ sessionGeneration: 1, accountSubjectId: 'account-1', deviceId: 'device-1', policy, ...overrides });
@@ -56,10 +56,45 @@ test('deferred response is rejected after account/session context changes', asyn
   assert.equal(writes.consent, null); assert.equal(writes.error, null);
 });
 
+test('invalidation without a replacement clears busy and allows later selection while stale response/error stay ignored', async () => {
+  const guard = createWebRequestGuard();
+  const writes = { consent: null, error: null, busy: true };
+  const busyRef = { current: true };
+  const setBusy = value => { writes.busy = value; };
+  let current = context();
+  const response = deferred();
+  const request = guard.begin(current);
+  const pendingResponse = applyGuardedResponse(response.promise, guard, request, () => current, writes);
+  const failure = deferred();
+  const pendingError = failure.promise.catch(error => {
+    if (guard.isCurrent(request, current)) writes.error = error.message;
+  }).finally(() => {
+    if (guard.isCurrent(request, current)) writes.busy = false;
+  });
+
+  supersedeWebRequest({ guard, busyRef, setBusy });
+  assert.equal(busyRef.current, false);
+  assert.equal(writes.busy, false);
+
+  response.resolve({ async json() { return { consent: { deviceId: 'old-device' } }; } });
+  failure.reject(new Error('old request failed'));
+  await Promise.all([pendingResponse, pendingError]);
+  assert.equal(writes.consent, null);
+  assert.equal(writes.error, null);
+
+  current = context({ deviceId: 'device-2' });
+  assert.equal(busyRef.current, false);
+  busyRef.current = true;
+  setBusy(true);
+  const replacement = guard.begin(current);
+  assert.equal(guard.isCurrent(replacement, current), true);
+  assert.equal(writes.busy, true);
+});
+
 test('stale deferred error cannot clear newer busy state or publish an error', async () => {
   const guard = createWebRequestGuard(); const writes = { busy: true, error: null }; let current = context();
   const response = deferred(); const request = guard.begin(current);
-  const pending = response.promise.catch(error => { if (guard.isCurrent(request, () => current)) writes.error = error.message; }).finally(() => { if (guard.isCurrent(request, () => current)) writes.busy = false; });
+  const pending = response.promise.catch(error => { if (guard.isCurrent(request, current)) writes.error = error.message; }).finally(() => { if (guard.isCurrent(request, current)) writes.busy = false; });
   const newer = guard.begin(context({ deviceId: 'device-2' })); current = context({ deviceId: 'device-2' }); writes.busy = true;
   response.reject(new Error('old device failed')); await pending;
   assert.equal(writes.error, null); assert.equal(writes.busy, true); assert.equal(guard.isCurrent(newer, current), true);
