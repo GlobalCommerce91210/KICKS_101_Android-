@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activateIosCollector, isCanonicalUuid, isCompleteCollectorStatus, verifiedCollectorConnection, verifiedCollectorStopped } from './iosCollectorActivation.mjs';
+import { activateIosCollector, collectorControlAction, isCanonicalUuid, isCompleteCollectorStatus, stopCollectorAndVerify, verifiedCollectorConnection, verifiedCollectorStopped } from './iosCollectorActivation.mjs';
 function fixture() {
   const calls = []; let consent = null; let subject = 'account-1';
   const policy = {permissionId:'permission-1',policyVersion:'v1',purposeVersion:'v1',purpose:'existing approved purpose'};
@@ -292,4 +292,37 @@ test('status and request ID validators accept only canonical values', () => {
   assert.equal(isCanonicalUuid('activation-1'), false);
   assert.equal(isCompleteCollectorStatus({ connected:false, consentVerified:false, collecting:false }), true);
   assert.equal(isCompleteCollectorStatus({ connected:false, collecting:false }), false);
+});
+
+
+test('disabled parent routes pending, active and unknown control states to strict Stop with mock native', async () => {
+  const calls = [];
+  const native = {
+    async stop() { calls.push('stop'); },
+    async getStatus() { return { connected:false, consentVerified:false, collecting:false }; },
+  };
+  for (const [state, startInFlight] of [['connecting', true], ['collecting', false], ['offline_unknown', false], ['stop_unconfirmed', false]]) {
+    const action = collectorControlAction(state, startInFlight);
+    assert.equal(action, 'stop');
+    await stopCollectorAndVerify(native);
+  }
+  assert.equal(calls.filter(call => call === 'stop').length, 4);
+  assert.equal(calls.includes('start'), false);
+});
+
+test('only verified off routes to Start; unknown and unconfirmed never invoke mock native start', async () => {
+  const calls = [];
+  const native = {
+    async start() { calls.push('start'); },
+    async stop() { calls.push('stop'); },
+    async getStatus() { return { connected:false, consentVerified:false, collecting:false }; },
+  };
+  const states = ['offline_unknown', 'stop_unconfirmed', 'connected_waiting_for_evidence', 'collecting'];
+  for (const state of states) {
+    assert.equal(collectorControlAction(state, false), 'stop');
+    await stopCollectorAndVerify(native);
+  }
+  assert.equal(collectorControlAction('off', false), 'start');
+  assert.equal(calls.includes('start'), false);
+  assert.equal(calls.filter(call => call === 'stop').length, states.length);
 });
