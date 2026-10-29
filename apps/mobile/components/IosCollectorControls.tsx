@@ -5,7 +5,7 @@ import { selectIosNativeAdapter } from '../services/iosNativeAdapter.mjs';
 import { randomUUID } from 'expo-crypto';
 import { Card, ui } from './Brand';
 import { useSession } from './SessionProvider';
-import { activateIosCollector, isCompleteCollectorStatus, verifiedCollectorConnection, verifiedCollectorStopped, type BoundCollectorConsent } from '../services/iosCollectorActivation.mjs';
+import { activateIosCollector, collectorControlAction, isCompleteCollectorStatus, stopCollectorAndVerify, verifiedCollectorConnection, type BoundCollectorConsent } from '../services/iosCollectorActivation.mjs';
 import { useMonitoringPolicy } from './useMonitoringPolicy';
 
 const states: Record<string, string> = {
@@ -49,29 +49,28 @@ export function IosCollectorControls({ disabled = false, onBusyChange }: { disab
   };
   const stop = async () => {
     if (!usableNative) { setState('offline_unknown'); setError('The native collector is unavailable; stop state cannot be confirmed.'); return; }
-    await usableNative.stop();
-    const status = await usableNative.getStatus();
-    if (!verifiedCollectorStopped(status)) throw new Error('Collector stop could not be confirmed. Turn off KICK’S VPN in iOS Settings.');
+    await stopCollectorAndVerify(usableNative);
     if (mounted.current) setState('off');
   };
   const stopFromControl = async () => {
-    if (disabled) return;
-    stopRequested.current = true;
-    runGeneration.current += 1;
-    // Accept Stop while Start is awaiting disclosure, consent, lease or iOS.
-    // The activation service performs the post-await cancellation and cleanup.
+    // Parent disabled state blocks a new Start but never blocks cancellation or Stop.
     if (startInFlight.current) {
+      stopRequested.current = true;
+      runGeneration.current += 1;
       if (mounted.current) { setState('connecting'); setError('Stop requested; canceling collector start.'); }
       return;
     }
     if (flight.current) return;
+    if (disabled && state === 'off') return;
+    stopRequested.current = true;
+    runGeneration.current += 1;
     flight.current = true; setBusy(true); onBusyChange?.(true); setError(null);
     try { await stop(); }
     catch { if (mounted.current) { setState('stop_unconfirmed'); setError('Turn off KICK’S VPN in iOS Settings.'); } }
     finally { flight.current = false; onBusyChange?.(false); if (mounted.current) setBusy(false); }
   };
   const start = async () => {
-    if (flight.current || disabled) return;
+    if (flight.current || disabled || state !== 'off') return;
     flight.current = true; startInFlight.current = true; stopRequested.current = false; const startRun = ++runGeneration.current; setBusy(true); onBusyChange?.(true); setError(null);
     try {
       const subjectId = manager.user?.subjectId;
@@ -160,16 +159,18 @@ export function IosCollectorControls({ disabled = false, onBusyChange }: { disab
     const interval = setInterval(() => { void verify(); }, 15_000);
     return () => { live = false; clearInterval(interval); };
   }, [user?.subjectId, manager.sessionGeneration, state, policy.permissionId, policy.policyVersion, policy.purposeVersion, policy.purpose]);
+  const stopAvailable = startInFlight.current || state !== 'off';
+  const buttonDisabled = (disabled && !stopAvailable) || (!usableNative && !stopAvailable) || (state === 'off' && !configured && !stopAvailable);
+  const buttonLabel = startInFlight.current ? 'STOP MONITORING' : busy ? 'STOPPING…' : state === 'off' ? 'SET UP COLLECTION' : 'STOP MONITORING';
   return <Card accent>
     <Text style={ui.h2}>Set Up Collection</Text>
     {policyError && <><Text accessibilityRole="alert" style={ui.body}>{policyError}</Text><Pressable accessibilityRole="button" disabled={busy} onPress={retry}><Text style={ui.label}>RETRY COLLECTION SETUP</Text></Pressable></>}
     {!usableNative && <Text accessibilityRole="alert" style={ui.body}>The native extension is unavailable. Install a verified staging build containing the signed Packet Tunnel extension, then retry. No fallback collection is enabled.</Text>}
     <Text accessibilityRole="alert" style={ui.body}>{states[state] ?? 'Checking collector status.'}</Text>
-    <Pressable accessibilityRole="button" disabled={disabled || state === 'checking' || !usableNative || (state === 'off' && !configured)} style={{minHeight:44,justifyContent:'center'}} onPress={() => {
-      if (startInFlight.current || ['collecting', 'connected_waiting_for_evidence', 'stop_unconfirmed'].includes(state)) {
-        void stopFromControl();
-      } else void start();
-    }}><Text style={ui.label}>{busy ? 'CHECKING…' : state === 'off' ? 'SET UP COLLECTION' : 'STOP MONITORING'}</Text></Pressable>
+    <Pressable accessibilityRole="button" disabled={buttonDisabled} style={{minHeight:44,justifyContent:'center'}} onPress={() => {
+      if (collectorControlAction(state, startInFlight.current) === 'stop') void stopFromControl();
+      else void start();
+    }}><Text style={ui.label}>{buttonLabel}</Text></Pressable>
     {error && <Text accessibilityRole="alert" style={ui.body}>{error}</Text>}
     <Text style={ui.body}>Stopping the VPN and revoking saved consent are separate controls. Review or withdraw your permission on the Permissions screen.</Text>
   </Card>;
