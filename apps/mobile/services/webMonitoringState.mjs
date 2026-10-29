@@ -6,8 +6,20 @@ export const WEB_MONITORING_STATES = Object.freeze({
   browser_control_unavailable: 'browser_control_unavailable',
 });
 
-export function webMonitoringContextKey({ accountSubjectId, deviceId, policy }) {
-  return [accountSubjectId ?? '', deviceId ?? '', policy?.permissionId ?? '', policy?.policyVersion ?? '', policy?.purposeVersion ?? '', policy?.purpose ?? ''].join('|');
+export function webMonitoringContextKey({ sessionGeneration = null, accountSubjectId = null, deviceId = null, policy }) {
+  return JSON.stringify([sessionGeneration, accountSubjectId, deviceId, policy?.permissionId ?? null, policy?.policyVersion ?? null, policy?.purposeVersion ?? null, policy?.purpose ?? null]);
+}
+
+export function createWebRequestGuard() {
+  let nonce = 0;
+  let disposed = false;
+  return {
+    begin(context) { const requestNonce = ++nonce; return { nonce: requestNonce, contextKey: webMonitoringContextKey(context) }; },
+    snapshot(context, requestNonce) { return { nonce: requestNonce, contextKey: webMonitoringContextKey(context) }; },
+    invalidate() { nonce += 1; },
+    cleanup() { disposed = true; nonce += 1; },
+    isCurrent(request, context) { return !disposed && request.nonce === nonce && request.contextKey === webMonitoringContextKey(context); },
+  };
 }
 
 export function webMonitoringState({ accountSubjectId, deviceId, policyConfigured, freshReview, browserCommandAvailable = false }) {
