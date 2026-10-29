@@ -56,7 +56,11 @@ class BoundedQueue(
     if (pending.isEmpty()) return null
     val items = ArrayList<Observation>()
     while (items.size < maxBatch && pending.isNotEmpty()) items.add(pending.removeFirst())
-    return Batch(newId(), items).also { inFlight = it }
+    return Batch(newId(), items).also {
+      inFlight = it
+      // The batch identity must reach durable storage before any network send can begin.
+      persist()
+    }
   }
 
   @Synchronized fun ack(batchId: String) { if (inFlight?.batchId == batchId) inFlight = null; persist() }
