@@ -5,9 +5,11 @@ import com.datastorm.kicks.vpn.core.AuthorityResponse
 import com.datastorm.kicks.vpn.core.AuthorityResult
 import com.datastorm.kicks.vpn.core.Batch
 import com.datastorm.kicks.vpn.core.BatchUploader
+import com.datastorm.kicks.vpn.core.DEVICE_ID_HEADER
 import com.datastorm.kicks.vpn.core.Reason
 import com.datastorm.kicks.vpn.core.Session
 import com.datastorm.kicks.vpn.core.UploadResult
+import com.datastorm.kicks.vpn.core.sessionHeaders
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -19,7 +21,7 @@ private fun connect(base: String, path: String, method: String, session: Session
     connectTimeout = 8_000
     readTimeout = 10_000
     instanceFollowRedirects = false
-    setRequestProperty("Authorization", "Bearer " + session.token)
+    sessionHeaders(session).forEach { (name, value) -> setRequestProperty(name, value) }
     setRequestProperty("Accept", "application/json")
   }
 }
@@ -32,7 +34,6 @@ private fun connect(base: String, path: String, method: String, session: Session
 class HttpAuthorityClient(private val baseUrl: String) : AuthorityClient {
   override fun fetch(session: Session): AuthorityResult = try {
     val c = connect(baseUrl, "/v1/collector/eligibility", "GET", session)
-    c.setRequestProperty("X-Kicks-Device", session.deviceId)
     try {
       when (val code = c.responseCode) {
         200 -> {
