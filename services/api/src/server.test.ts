@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import{buildServer,memoryStore}from'./server.js';import{randomUUID}from'node:crypto';
-const setup=async()=>{const store=memoryStore(),app=buildServer({store,adminSecret:'staging-secret'}),subjectId=randomUUID();const r=await app.inject({method:'POST',url:'/v1/staging/devices',headers:{'x-admin-secret':'staging-secret'},payload:{subjectId}});return{app,store,token:r.json().token as string}};
+const setup=async()=>{const store=memoryStore(),app=buildServer({store,adminSecret:'staging-secret',enableStagingDevices:true}),subjectId=randomUUID();const r=await app.inject({method:'POST',url:'/v1/staging/devices',headers:{'x-admin-secret':'staging-secret'},payload:{subjectId}});return{app,store,token:r.json().token as string}};
 test('health reports metadata-only staging',async()=>{const app=buildServer(),r=await app.inject({method:'GET',url:'/health'});assert.equal(r.json().collector,'metadata-only');await app.close()});
 test('serves web app index.html on root path',async()=>{const app=buildServer(),r=await app.inject({method:'GET',url:'/'});assert.equal(r.statusCode,200);assert.match(r.headers['content-type']??'',/text\/html/);await app.close()});
 test('zero trust denies unauthenticated consent writes',async()=>{const app=buildServer(),r=await app.inject({method:'POST',url:'/v1/consent-events',payload:{}});assert.equal(r.statusCode,401);await app.close()});
@@ -106,7 +106,7 @@ test('intelligence and value engine endpoints satisfy openapi contract', async (
 });
 
 test('wallet mechanic endpoints satisfy openapi contract', async () => {
-  const app = buildServer({ adminSecret: 'sec' });
+  const app = buildServer({ adminSecret: 'sec', enableStagingDevices: true });
 
   // 1. GET /v1/wallet/:user_id
   const summaryRes = await app.inject({
@@ -200,7 +200,7 @@ test('wallet mechanic endpoints satisfy openapi contract', async () => {
 });
 
 test('permissions control endpoints satisfy openapi contract', async () => {
-  const app = buildServer({ adminSecret: 'sec' });
+  const app = buildServer({ adminSecret: 'sec', enableStagingDevices: true });
 
   // 1. GET /v1/permissions/users/:user_id/apps
   const appsRes = await app.inject({
@@ -314,7 +314,7 @@ test('permissions control endpoints satisfy openapi contract', async () => {
 });
 
 test('wallet permissions enforcement: blocked apps, metadata, buyers deny earnings and payouts', async () => {
-  const app = buildServer({ adminSecret: 'sec' });
+  const app = buildServer({ adminSecret: 'sec', enableStagingDevices: true });
 
   // 1. Initial earn succeeds
   const earnRes1 = await app.inject({
@@ -388,7 +388,7 @@ test('wallet permissions enforcement: blocked apps, metadata, buyers deny earnin
 });
 
 test('branding endpoints return official brand and mascot specification', async () => {
-  const app = buildServer({ adminSecret: 'sec' });
+  const app = buildServer({ adminSecret: 'sec', enableStagingDevices: true });
 
   const res = await app.inject({
     method: 'GET',

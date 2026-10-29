@@ -97,6 +97,7 @@ android {
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
         buildConfigField "boolean", "COLLECTOR_ENABLED", "${findProperty('kicks.collectorEnabled') ?: 'false'}"
+        buildConfigField "String", "COLLECTOR_API_BASE_URL", "\"${findProperty('kicks.collectorApiBaseUrl') ?: ''}\""
     }
     signingConfigs {
         debug {
@@ -180,4 +181,7 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    // Pure-JVM tests for the collector core (src/test/java/.../vpn/core)
+    testImplementation("junit:junit:4.13.2")
 }
