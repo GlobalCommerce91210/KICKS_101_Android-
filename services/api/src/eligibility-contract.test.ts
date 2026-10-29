@@ -33,11 +33,12 @@ async function setup() {
     }
   });
   assert.equal(grant.statusCode, 202);
-  return { app, store, headers, permissionId };
+  const grantBody = grant.json();
+  return { app, store, headers, permissionId, decisionId: grantBody.id as string, decisionVersion: String(grantBody.eventSequence) };
 }
 
 test('eligibility is informational and ingestion reauthorizes separately', async () => {
-  const { app, store, headers, permissionId } = await setup();
+  const { app, store, headers, permissionId, decisionId, decisionVersion } = await setup();
 
   const eligibility = await app.inject({
     method: 'POST',
@@ -53,8 +54,13 @@ test('eligibility is informational and ingestion reauthorizes separately', async
   assert.equal(eligibilityBody.purpose, purpose);
   assert.equal(eligibilityBody.activationRequested, true);
   assert.equal(eligibilityBody.monitoringDefaultOn, false);
+  assert.equal(eligibilityBody.decisionId, decisionId);
+  assert.equal(eligibilityBody.decisionVersion, decisionVersion);
+  assert.equal(eligibilityBody.policyVersion, 'privacy-1');
+  assert.equal(eligibilityBody.purposeVersion, 'network-safety-1');
   assert.deepEqual(Object.keys(eligibilityBody).sort(), [
-    'activationRequested', 'deviceId', 'eligible', 'monitoringDefaultOn', 'permissionId', 'purpose', 'state'
+    'activationRequested', 'decisionId', 'decisionVersion', 'deviceId', 'eligible', 'monitoringDefaultOn',
+    'permissionId', 'policyVersion', 'purpose', 'purposeVersion', 'state'
   ]);
   assert.equal('expiresAt' in eligibilityBody, false);
 
@@ -97,6 +103,32 @@ test('eligibility is informational and ingestion reauthorizes separately', async
   assert.equal(store.collectorAudit[0]!.reason, 'authoritative_evidence_provider_missing');
   assert.equal(store.observations.length, 0);
 
+  await app.close();
+});
+
+test('eligibility denies without a current consent record and emits no version/reference fields', async () => {
+  const store = memoryStore();
+  const app = buildServer({ store, adminSecret: 'staging-secret' });
+  const subjectId = randomUUID();
+  const device = await app.inject({
+    method: 'POST',
+    url: '/v1/staging/devices',
+    headers: { 'x-admin-secret': 'staging-secret' },
+    payload: { subjectId }
+  });
+  assert.equal(device.statusCode, 201);
+  const response = await app.inject({
+    method: 'POST',
+    url: '/v1/collector/eligibility',
+    headers: { authorization: `Bearer ${device.json().token as string}` },
+    payload: { permissionId: randomUUID(), purpose, activationRequested: true }
+  });
+  assert.equal(response.statusCode, 403);
+  const body = response.json();
+  assert.deepEqual(body, { eligible: false, error: 'active_purpose_consent_required' });
+  for (const field of ['decisionId', 'decisionVersion', 'policyVersion', 'purposeVersion']) {
+    assert.equal(field in body, false);
+  }
   await app.close();
 });
 
