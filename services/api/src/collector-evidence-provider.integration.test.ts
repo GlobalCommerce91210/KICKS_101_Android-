@@ -24,9 +24,9 @@ test('PostgreSQL evidence provider authorizes only with complete independently v
 
     const subject = randomUUID(), deviceId = randomUUID(), permission = randomUUID(), eventId = randomUUID();
     await pool.query("INSERT INTO devices (id, subject_id, token_hash, environment) VALUES ($1,$2,'h','staging')", [deviceId, subject]);
-    const decide = (id: string, action: string) => pool!.query(
+    const decide = (id: string, action: string, permissionId = permission) => pool!.query(
       "INSERT INTO consent_events (id, request_id, subject_id, permission_id, action, policy_version, purpose_version, purpose, correlation_id) VALUES ($1,$1,$2,$3,$4,'p1','d1',$5,$1)",
-      [id, subject, permission, action, purpose]);
+      [id, subject, permissionId, action, purpose]);
     await decide(eventId, 'grant');
 
     const svc = new CollectorAuthorizationService(new PostgresCollectorEvidenceProvider(pool, { requiredChain: CHAIN }));
@@ -64,6 +64,43 @@ test('PostgreSQL evidence provider authorizes only with complete independently v
     await pool.query("INSERT INTO os_permission_attestations (id, device_id, status, verifier_id, expires_at) VALUES ($1,$2,'SERVER_VERIFIED','play-integrity', now() + interval '1 hour')", [randomUUID(), deviceId]);
     const ok = await svc.authorizeCollector(req);
     assert.equal(ok.state, 'ELIGIBLE');
+
+    // Five-linkage negative cases: every cross-link must fail closed.
+    const wrongSubject = randomUUID();
+    await pool.query('UPDATE device_enrollments SET subject_id = $1 WHERE device_id = $2', [wrongSubject, deviceId]);
+    assert.equal(await state(), 'BLOCKED_DEVICE_NOT_ENROLLED');
+    await pool.query('UPDATE device_enrollments SET subject_id = $1 WHERE device_id = $2', [subject, deviceId]);
+
+    await pool.query('UPDATE revocation_epochs SET subject_id = $1 WHERE permission_id = $2', [wrongSubject, permission]);
+    assert.equal(await state(), 'BLOCKED_SERVICE_UNAVAILABLE');
+    await pool.query('UPDATE revocation_epochs SET subject_id = $1 WHERE permission_id = $2', [subject, permission]);
+
+    const permission2 = randomUUID();
+    const event2 = randomUUID();
+    await decide(event2, 'grant', permission2);
+    const receipt2 = randomUUID();
+    await pool.query('INSERT INTO consent_receipts (id, consent_event_id, permission_id, subject_id, decision_version, receipt_hash) VALUES ($1,$2,$3,$4,$6,$5)',
+      [receipt2, event2, permission, subject, createHash('sha256').update(event2).digest('hex'), event2]);
+    const req2 = { ...req, consentScope: permission2 };
+    assert.equal((await svc.authorizeCollector(req2)).state, 'BLOCKED_VERIFICATION_FAILED');
+
+    const permission3 = randomUUID();
+    const event3 = randomUUID();
+    await decide(event3, 'grant', permission3);
+    const receipt3 = randomUUID();
+    await pool.query('INSERT INTO consent_receipts (id, consent_event_id, permission_id, subject_id, decision_version, receipt_hash) VALUES ($1,$2,$3,$4,$6,$5)',
+      [receipt3, event3, permission3, subject, createHash('sha256').update(event3).digest('hex'), event3]);
+    const proof3 = randomUUID();
+    await pool.query("INSERT INTO chain_proofs (id, receipt_id, chain_id, status, submitted_by) VALUES ($1,$2,$3,'PENDING','stamper-3')", [proof3, receipt3, CHAIN]);
+    await pool.query(`INSERT INTO proof_verifications (id, chain_proof_id, receipt_id, verifier_id, result, chain_id, finality_reached, provider_quorum) VALUES ($1,$2,$3,$4,'VERIFIED',$5,true,2)`,
+      [randomUUID(), proof3, receipt2, 'verifier-3', CHAIN]);
+    const req3 = { ...req, consentScope: permission3 };
+    assert.equal((await svc.authorizeCollector(req3)).state, 'BLOCKED_VERIFICATION_FAILED');
+
+    const proof4 = randomUUID();
+    await pool.query("INSERT INTO chain_proofs (id, receipt_id, chain_id, status, submitted_by) VALUES ($1,$2,'eip155:1','PENDING','stamper-4')", [proof4, receipt3]);
+    await pool.query("INSERT INTO proof_verifications (id, chain_proof_id, receipt_id, verifier_id, result, chain_id, finality_reached, provider_quorum, verified_at) VALUES ($1,$2,$3,'verifier-4','VERIFIED',$4,true,2,now() + interval '1 second')", [randomUUID(), proof4, receipt3, CHAIN]);
+    assert.equal((await svc.authorizeCollector(req3)).state, 'BLOCKED_VERIFICATION_FAILED');
 
     // A different subject can't use this device.
     assert.equal((await svc.authorizeCollector({ ...req, authenticatedSubject: randomUUID() })).state, 'BLOCKED_DEVICE_NOT_ENROLLED');

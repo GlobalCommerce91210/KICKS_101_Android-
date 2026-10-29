@@ -40,8 +40,8 @@ export class PostgresCollectorEvidenceProvider implements CollectorEvidenceProvi
   async loadEvidence(request: CollectorAuthorizationRequest, transaction?: unknown): Promise<CollectorEvidence | null> {
     const db: Queryable = (transaction as PoolClient | undefined) ?? this.pool;
     const lock = transaction ? ' FOR SHARE' : '';
-    const device = await db.query<{ id: string; subject_id: string; revoked_at: Date | null; enrollment: string | null }>(
-      `SELECT d.id, d.subject_id, d.revoked_at, e.status AS enrollment
+    const device = await db.query<{ id: string; subject_id: string; revoked_at: Date | null; enrollment: string | null; enrollment_subject_id: string | null }>(
+      `SELECT d.id, d.subject_id, d.revoked_at, e.status AS enrollment, e.subject_id AS enrollment_subject_id
          FROM devices d LEFT JOIN device_enrollments e ON e.device_id = d.id
         WHERE d.id = $1`, [request.deviceId]);
     const dev = device.rows[0];
@@ -51,33 +51,36 @@ export class PostgresCollectorEvidenceProvider implements CollectorEvidenceProvi
       `SELECT id, subject_id, action, purpose, policy_version, purpose_version FROM consent_events
         WHERE permission_id = $1 ORDER BY event_sequence DESC LIMIT 1`, [request.consentScope]);
     const c = consent.rows[0];
-    const epoch = await db.query<{ epoch: string }>(`SELECT epoch FROM revocation_epochs WHERE permission_id = $1${lock}`, [request.consentScope]);
+    const epoch = await db.query<{ epoch: string; subject_id: string }>(`SELECT epoch, subject_id FROM revocation_epochs WHERE permission_id = $1${lock}`, [request.consentScope]);
     const policy = await db.query<{ policy_version: string; disclosure_version: string; verdict: string }>(
       'SELECT policy_version, disclosure_version, verdict FROM safety_policies ORDER BY created_at DESC, id DESC LIMIT 1');
     const attestation = await db.query<{ status: string; expires_at: Date }>(
       'SELECT status, expires_at FROM os_permission_attestations WHERE device_id = $1 ORDER BY attested_at DESC, id DESC LIMIT 1', [request.deviceId]);
-    const receipt = c ? await db.query<{ id: string; decision_version: string; subject_id: string }>(
-      'SELECT id, decision_version, subject_id FROM consent_receipts WHERE consent_event_id = $1', [c.id]) : { rows: [] };
+    const receipt = c ? await db.query<{ id: string; permission_id: string; decision_version: string; subject_id: string }>(
+      'SELECT id, permission_id, decision_version, subject_id FROM consent_receipts WHERE consent_event_id = $1', [c.id]) : { rows: [] };
     const r = receipt.rows[0];
-    const verification = r ? await db.query<{ result: string; chain_id: string; finality_reached: boolean; provider_quorum: number; verifier_id: string; stamper: string }>(
-      `SELECT v.result, v.chain_id, v.finality_reached, v.provider_quorum, v.verifier_id, p.submitted_by AS stamper
+    const verification = r ? await db.query<{ result: string; receipt_id: string; chain_id: string; proof_chain_id: string; finality_reached: boolean; provider_quorum: number; verifier_id: string; stamper: string; proof_receipt_id: string }>(
+      `SELECT v.result, v.receipt_id, v.chain_id, p.receipt_id AS proof_receipt_id, p.chain_id AS proof_chain_id, v.finality_reached, v.provider_quorum, v.verifier_id, p.submitted_by AS stamper
          FROM proof_verifications v JOIN chain_proofs p ON p.id = v.chain_proof_id
-        WHERE v.receipt_id = $1 ORDER BY v.verified_at DESC, v.id DESC LIMIT 1`, [r.id]) : { rows: [] };
+        WHERE p.receipt_id = $1 ORDER BY v.verified_at DESC, v.id DESC LIMIT 1`, [r.id]) : { rows: [] };
     const pending = r && verification.rows.length === 0 ? await db.query<{ status: string }>(
       "SELECT status FROM chain_proofs WHERE receipt_id = $1 AND status IN ('PENDING','SUBMITTED') LIMIT 1", [r.id]) : { rows: [] };
     const v = verification.rows[0];
 
     const minQuorum = Math.max(this.options.minProviderQuorum ?? 2, 1);
     const distinct = this.options.requireDistinctVerifier !== false;
-    const verified = !!v && v.result === 'VERIFIED' && v.provider_quorum >= minQuorum && (!distinct || v.verifier_id !== v.stamper);
+    const verified = !!v && v.result === 'VERIFIED' && v.receipt_id === r?.id && v.proof_receipt_id === r?.id && v.chain_id === v.proof_chain_id && v.provider_quorum >= minQuorum && (!distinct || v.verifier_id !== v.stamper);
     const policyRow = policy.rows[0];
     const att = attestation.rows[0];
     const attFresh = !!att && att.expires_at.getTime() > Date.now();
-    const epochValue = epoch.rows[0] ? Number(epoch.rows[0].epoch) : -1; // missing => deny (negative is invalid)
+    const epochRow = epoch.rows[0];
+    const epochValue = epochRow && epochRow.subject_id === dev.subject_id && epochRow.subject_id === request.authenticatedSubject
+      ? Number(epochRow.epoch)
+      : -1; // missing or cross-subject epoch => deny (negative is invalid)
     const decision = (c?.action ?? '').toUpperCase();
 
     return {
-      subjectValid: !!c && c.subject_id === dev.subject_id,
+      subjectValid: !!c && c.subject_id === dev.subject_id && dev.enrollment_subject_id === dev.subject_id && dev.enrollment_subject_id === request.authenticatedSubject,
       deviceOwnerSubject: dev.subject_id,
       deviceEnrollment: dev.revoked_at ? 'REVOKED' : (['ACTIVE', 'PENDING', 'REVOKED'].includes(dev.enrollment ?? '') ? dev.enrollment as 'ACTIVE' | 'PENDING' | 'REVOKED' : 'UNKNOWN'),
       consentDecision: decision === 'GRANT' || decision === 'DENY' || decision === 'REVOKE' ? decision : 'UNKNOWN',
@@ -89,7 +92,7 @@ export class PostgresCollectorEvidenceProvider implements CollectorEvidenceProvi
       currentDisclosureVersion: policyRow?.disclosure_version ?? '',
       decisionVersion: c?.id ?? '',
       receiptDecisionVersion: r?.decision_version ?? '',
-      receiptStatus: r && c && r.decision_version === c.id && r.subject_id === c.subject_id ? 'IMMUTABLE' : r ? 'INVALID' : 'MISSING',
+      receiptStatus: r && c && r.permission_id === request.consentScope && r.decision_version === c.id && r.subject_id === c.subject_id ? 'IMMUTABLE' : r ? 'INVALID' : 'MISSING',
       proofStatus: verified ? 'INDEPENDENTLY_VERIFIED' : v ? 'FAILED' : pending.rows.length ? 'PENDING' : 'MISSING',
       proofChain: v?.chain_id ?? '',
       requiredChain: this.options.requiredChain,
