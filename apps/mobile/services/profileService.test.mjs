@@ -102,3 +102,36 @@ for (const denied of [
     assert.equal(resourceReads, 0);
   });
 }
+
+function walletManager(walletBody) {
+  return {
+    user: { subjectId: 'ds-sub', email: 'owner@example.test' },
+    async request(path) {
+      if (path.endsWith('/account')) return response({ subject_id: 'ds-sub', email: 'owner@example.test', account_status: 'active' });
+      if (path.endsWith('/products/kicks')) return response({ entitlement: { subject_id: 'ds-sub', status: 'active' }, profile: { subject_id: 'ds-sub', status: 'active' } });
+      if (path === '/core/consumer/v1/wallet') return response(walletBody);
+      return response({});
+    }
+  };
+}
+
+test('accepts canonical wallet numeric zero and positive totals without coercion', async () => {
+  const view = await loadConsumerProfile(walletManager({ total_earned: 0, total_pending: 12.5, total_settled: 0 }));
+  assert.deepEqual(view.wallet, { total_earned: 0, total_pending: 12.5, total_settled: 0 });
+  assert.ok(!view.unavailable.includes('wallet'));
+});
+
+for (const malformedWallet of [
+  {},
+  { total_earned: 1, total_pending: 2 },
+  { total_earned: 1, total_pending: 2, total_settled: '3' },
+  { total_earned: -1, total_pending: 2, total_settled: 3 },
+  { total_earned: Number.NaN, total_pending: 2, total_settled: 3 },
+  null
+]) {
+  test('rejects malformed 2xx wallet response: ' + JSON.stringify(malformedWallet), async () => {
+    const view = await loadConsumerProfile(walletManager(malformedWallet));
+    assert.equal(view.wallet, null);
+    assert.ok(view.unavailable.includes('wallet'));
+  });
+}
