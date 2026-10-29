@@ -1,6 +1,6 @@
-# KICK'S Mobile Hub — Android Native + Expo/React Native
+# KICK'S Application Hub — iOS, Android and Expo Web
 
-This repository is the **single source of truth for active KICK’S mobile development**.
+This repository is the **single source of truth for active KICK’S iOS, Android and web application development**.
 
 It combines:
 
@@ -78,6 +78,41 @@ npm --workspace @kicks/mobile run android
 ```
 
 For native Android work, use the repository's Gradle/Android Studio workflow.
+
+### Expo web development
+
+Web is an active development platform using the same `apps/mobile` Expo Router
+application as iOS and Android. Do not create a separate demo application to
+substitute for browser acceptance.
+
+```bash
+npm ci --ignore-scripts
+npm run dev:web
+```
+
+The development server prints the browser URL. Browser API clients use their
+current origin; Expo's development server alone does not supply the KICK'S API.
+For an integrated local preview, export the real web application and start the
+API, which serves the generated web assets on the same origin:
+
+```bash
+npm run build:web
+npm run start
+```
+
+The root build exports `apps/mobile/dist` and copies it to `dist`. Run that build
+before the API suite when verifying the root HTML route. Do not add a dummy index
+file to make a missing-export test pass. Use an isolated local test environment,
+without production database credentials, for this preview.
+
+Browser acceptance covers responsive navigation, account sign-in/sign-out and
+refresh behavior, consent/settings, and the marketplace, rewards and partner
+sharing journeys. Current web sessions are memory-only; refreshing the browser
+does not establish native Keychain or persistent browser-session acceptance.
+Keep synthetic observations and unconnected commercial integrations explicitly
+identified. Browser success does not prove native enrollment, VPN approval,
+device collection, payouts or partner delivery. Collector monitoring stays OFF.
+Hosting and DigitalOcean changes remain subject to their separate release holds.
 
 ## Versioning direction
 

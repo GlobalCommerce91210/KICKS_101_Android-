@@ -26,7 +26,7 @@ const USER_ID = 'user_demo_01';
 type Tab = 'apps' | 'metadata' | 'buyers' | 'audit_log';
 
 export default function Permissions() {
-  return Platform.OS === 'ios' ? <AccountPermissions /> : <LegacyPermissions />;
+  return Platform.OS === 'ios' || Platform.OS === 'web' ? <AccountPermissions /> : <LegacyPermissions />;
 }
 function LegacyPermissions() {
   const [activeTab, setActiveTab] = useState<Tab>('apps');
