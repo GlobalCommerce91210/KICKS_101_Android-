@@ -221,7 +221,22 @@ test('null or partial initial status blocks all side effects after status read',
   }
 });
 
-test('deferred OS authorization cancellation prevents a late native start', async () => {
+test('cancellation during deferred lease stops the pre-existing active tunnel', async () => {
+  const f = fixture(); let canceled = false; let resolveLease;
+  const lease = new Promise(resolve => { resolveLease = resolve; });
+  f.deps.isCanceled = () => canceled;
+  f.deps.renewLease = async () => { f.calls.push('lease'); await lease; };
+  const pending = activateIosCollector(f.deps);
+  for (let i = 0; i < 20 && !f.calls.includes('lease'); i++) await new Promise(resolve => setImmediate(resolve));
+  assert.ok(f.calls.includes('lease'));
+  canceled = true; resolveLease();
+  assert.equal((await pending).state, 'off');
+  assert.ok(!f.calls.includes('start'));
+  assert.ok(f.calls.includes('stop'));
+  assert.equal(verifiedCollectorStopped(await f.deps.native.getStatus()), true);
+});
+
+test('deferred OS authorization cancellation stops the pre-existing active tunnel and prevents a late start', async () => {
   const f = fixture(); let canceled = false; let resolveAuthorization;
   const authorization = new Promise(resolve => { resolveAuthorization = resolve; });
   f.deps.isCanceled = () => canceled;
@@ -232,6 +247,8 @@ test('deferred OS authorization cancellation prevents a late native start', asyn
   canceled = true; resolveAuthorization('authorized');
   assert.equal((await pending).state, 'off');
   assert.ok(!f.calls.includes('start'));
+  assert.ok(f.calls.includes('stop'));
+  assert.equal(verifiedCollectorStopped(await f.deps.native.getStatus()), true);
 });
 
 test('cancellation after native start verifies cleanup before returning off', async () => {
@@ -248,6 +265,26 @@ test('cancellation after native start verifies cleanup before returning off', as
   assert.ok(f.calls.includes('start')); canceled = true; resolveStart();
   assert.equal((await pending).state, 'off');
   assert.ok(f.calls.includes('stop')); assert.equal(verifiedCollectorStopped(await f.deps.native.getStatus()), true);
+});
+
+test('pre-start cancellation never returns off when stop fails or remains incomplete', async () => {
+  for (const stopMode of ['throws', 'active']) {
+    const f = fixture(); let canceled = false; let resolveLease;
+    const lease = new Promise(resolve => { resolveLease = resolve; });
+    f.deps.isCanceled = () => canceled;
+    f.deps.renewLease = async () => { f.calls.push('lease'); await lease; };
+    if (stopMode === 'throws') {
+      f.deps.native.stop = async () => { f.calls.push('stop'); throw Error('stop failed'); };
+    } else {
+      f.deps.native.stop = async () => { f.calls.push('stop'); };
+      f.deps.native.getStatus = async () => ({ connected:true, consentVerified:true, collecting:true });
+    }
+    const pending = activateIosCollector(f.deps);
+    for (let i = 0; i < 20 && !f.calls.includes('lease'); i++) await new Promise(resolve => setImmediate(resolve));
+    assert.ok(f.calls.includes('lease')); canceled = true; resolveLease();
+    await assert.rejects(pending, /stop could not be confirmed/);
+    assert.ok(f.calls.includes('stop'));
+  }
 });
 
 test('status and request ID validators accept only canonical values', () => {
