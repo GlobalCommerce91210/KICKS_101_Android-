@@ -18,6 +18,13 @@ class AuthorizationAtStartTest {
   @Test fun osVpnNotAuthorizedDenies() { val h = Harness(); h.os.vpn = false; denied(h, Reason.OS_VPN_NOT_AUTHORIZED) }
   @Test fun notificationsBlockedDenies() { val h = Harness(); h.os.notifications = false; denied(h, Reason.NOTIFICATIONS_BLOCKED) }
   @Test fun consentNotGrantedDenies() { val h = Harness(); h.authority.result = okResponse(consent = "revoked"); denied(h, Reason.CONSENT_NOT_GRANTED) }
+  @Test fun missingConsentIdOrPurposeDenies() {
+    val h = Harness()
+    h.authority.result = AuthorityResult.Ok(
+      AuthorityResponse(true, "acct-a", "acct-a", "granted", null, null, true)
+    )
+    denied(h, Reason.CONSENT_NOT_GRANTED)
+  }
   @Test fun dataSharingOffDenies() { val h = Harness(); h.authority.result = okResponse(sharing = false); denied(h, Reason.DATA_SHARING_OFF) }
   @Test fun serverSideSessionRevokedDenies() { val h = Harness(); h.authority.result = okResponse(active = false); denied(h, Reason.SESSION_REVOKED) }
   @Test fun authorityRejectionDenies() { val h = Harness(); h.authority.result = AuthorityResult.Rejected(Reason.SESSION_REVOKED); denied(h, Reason.SESSION_REVOKED) }
@@ -238,3 +245,4 @@ class NetworkChangeAndShutdownTest {
     h.controller.explicitStop()
   }
 }
+
