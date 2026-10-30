@@ -38,6 +38,17 @@ test('account change while confirming enrollment rejects the connection', async 
 test('unsupported enrollment fails without account or device mutations', async () => {
   const f = fixture(); await assert.rejects(enrollCurrentDevice(f.manager), /unavailable/); assert.equal(f.calls.length, 0);
 });
+test('in-place account subject change during enrollment rejects stale native proof', async () => {
+  const f = fixture();
+  f.native.provision = async () => {
+    f.calls.push({ method: 'PROVISION' });
+    f.manager.user.subjectId = 'other';
+    return 'device';
+  };
+  await assert.rejects(enrollCurrentDevice(f.manager, f.native), /session changed/);
+  assert.deepEqual(f.calls.map(c => c.method), ['PROVISION']);
+});
+
 test('session change during enrollment discards the result', async () => {
   const f = fixture(); f.native.provision = async () => { f.manager.user = { subjectId: 'other' }; return 'device'; };
   await assert.rejects(enrollCurrentDevice(f.manager, f.native), /session changed/);

@@ -2,17 +2,18 @@
 export async function enrollCurrentDevice(manager, native) {
   const account = manager.user;
   if (!account) throw new Error('Sign in to enroll this device.');
+  const accountSubjectId = account.subjectId;
   if (!native?.provision) throw new Error('Secure enrollment is unavailable in this build. Install a verified staging build with the native extension.');
   const deviceId = await manager.provisionIosCollector({ provision: native.provision.bind(native) });
-  if (manager.user !== account) throw new Error('Your session changed. Refresh My Devices.');
+  if (manager.user !== account || manager.user?.subjectId !== accountSubjectId) throw new Error('Your session changed. Refresh My Devices.');
   if (typeof deviceId !== 'string' || !deviceId) throw new Error('Device enrollment returned no identity. Refresh and retry.');
   const response = await manager.request('/core/consumer/v1/devices');
-  if (manager.user !== account) throw new Error('Your session changed. Refresh My Devices.');
+  if (manager.user !== account || manager.user?.subjectId !== accountSubjectId) throw new Error('Your session changed. Refresh My Devices.');
   if (!response.ok) throw new Error('Enrollment could not be confirmed. Refresh My Devices before continuing.');
   const result = await response.json();
-  if (manager.user !== account) throw new Error('Your session changed. Refresh My Devices.');
+  if (manager.user !== account || manager.user?.subjectId !== accountSubjectId) throw new Error('Your session changed. Refresh My Devices.');
   if (!Array.isArray(result.devices) || !result.devices.some(device => device.device_id === deviceId &&
-      device.subject_id === account.subjectId && device.platform === 'ios' && device.status === 'active')) {
+      device.subject_id === accountSubjectId && device.platform === 'ios' && device.status === 'active')) {
     throw new Error('This iPad’s connection to your account could not be confirmed. Collection remains off. Refresh and retry.');
   }
   return deviceId;
@@ -21,8 +22,9 @@ export async function enrollCurrentDevice(manager, native) {
 export async function revokeAndUnlinkDevice(manager, deviceId, policy, native, requestId) {
   const account = manager.user;
   if (!account) throw new Error('Sign in to manage devices.');
+  const accountSubjectId = account.subjectId;
   const current = () => {
-    if (manager.user !== account) throw new Error('Your session changed. Refresh My Devices.');
+    if (manager.user !== account || manager.user?.subjectId !== accountSubjectId) throw new Error('Your session changed. Refresh My Devices.');
   };
   if (!policy.permissionId) throw new Error('The collection permission is not configured. Contact staging support before unlinking.');
   // Stop locally first when this is the current native device. Never erase credentials.

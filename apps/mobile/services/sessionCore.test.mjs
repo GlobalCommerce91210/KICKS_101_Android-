@@ -186,6 +186,29 @@ test('native provisioning shares the current refresh flow without persisting a b
   assert.notEqual(f.manager.sessionGeneration, generation);
 });
 
+test('native enrollment rejects an in-place account subject mutation', async () => {
+  const f = fixture();
+  await f.manager.login('owner@example.test', 'password');
+  const account = f.manager.user;
+  let release;
+  let entered;
+  const gate = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { entered = resolve; });
+  const pending = f.manager.provisionIosCollector({
+    async provision(_origin, _bearer, subject) {
+      assert.equal(subject, 'ds-sub');
+      entered();
+      await gate;
+      return 'ipad';
+    },
+  });
+  await started;
+  account.subjectId = 'different-subject';
+  release();
+  await assert.rejects(pending, /session changed/);
+  assert.equal(f.manager.user, account);
+});
+
 test('expiring session refresh cannot turn successful native enrollment into a false account-switch failure', async () => {
   const f = fixture({ expired: true });
   const manager = new SessionManager(f.storage, () => 'https://beta.example.test', async (url, init) => {
