@@ -7,6 +7,9 @@ export class DeviceOwnershipConflict extends Error {
 export class DeviceBindingRevoked extends Error {
   constructor() { super('device_binding_revoked'); }
 }
+export class DeviceBindingAmbiguous extends Error {
+  constructor() { super('device_binding_ambiguous'); }
+}
 
 export interface ConsumerDeviceBinding {
   binding_id: string;
@@ -32,6 +35,9 @@ export interface ConsumerDeviceBindingStore {
   }): Promise<ConsumerDeviceBinding>;
 
   list(subjectId: string): Promise<ConsumerDeviceBinding[]>;
+
+  // Lookup only: callers must still verify account authority and current consent.
+  findActiveByDeviceId(deviceId: string): Promise<ConsumerDeviceBinding | null>;
 
   revoke(
     subjectId: string,
@@ -110,6 +116,15 @@ implements ConsumerDeviceBindingStore {
   }
 
   async close(): Promise<void> {}
+
+  async findActiveByDeviceId(deviceId: string): Promise<ConsumerDeviceBinding | null> {
+    const rows = [...this.bindings.values()].filter(binding => binding.device_id === deviceId);
+    if (rows.length === 0) return null;
+    if (rows.length !== 1) throw new DeviceBindingAmbiguous();
+    const binding = rows[0]!;
+    if (binding.status !== 'active') throw new DeviceBindingRevoked();
+    return clone(binding);
+  }
 }
 
 function mapBinding(row: Record<string, unknown>): ConsumerDeviceBinding {
@@ -276,5 +291,17 @@ implements ConsumerDeviceBindingStore {
 
   async close(): Promise<void> {
     await this.pool.end();
+  }
+
+  async findActiveByDeviceId(deviceId: string): Promise<ConsumerDeviceBinding | null> {
+    await this.ensureSchema();
+    const result = await this.pool.query(
+      'SELECT * FROM consumer_device_bindings WHERE device_id=$1 ORDER BY bound_at DESC',
+      [deviceId],
+    );
+    if (result.rows.length === 0) return null;
+    if (result.rows.length !== 1) throw new DeviceBindingAmbiguous();
+    if (result.rows[0].status !== 'active') throw new DeviceBindingRevoked();
+    return mapBinding(result.rows[0]);
   }
 }
