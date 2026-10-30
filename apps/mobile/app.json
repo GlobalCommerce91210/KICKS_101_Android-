@@ -7,7 +7,14 @@
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "react-native-auth0",
+        {
+          "domain": "dev-dxqiztc3dpbtcfkd.us.auth0.com",
+          "customScheme": "kicksauth"
+        }
+      ]
     ],
     "android": {
       "package": "com.datastorm.kicks",

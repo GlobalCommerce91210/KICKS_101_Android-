@@ -1,11 +1,39 @@
 import { useState } from 'react';
 import { Alert, Linking, NativeModules, Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { useAuth0 } from 'react-native-auth0';
 import { BrandHeader, Card, Screen, colors, ui } from '../components/Brand';
 import { BRAND_MANIFEST } from '../constants/branding';
+
+const AUTH0_SCHEME = 'kicksauth';
 
 export default function Settings() {
   const [monitoring, setMonitoring] = useState(false);
   const [diagnostics, setDiagnostics] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  const { authorize, clearSession, user, isLoading: authLoading, error: authError } = useAuth0();
+
+  const signIn = async () => {
+    setAuthBusy(true);
+    try {
+      await authorize({ scope: 'openid profile email offline_access' }, { customScheme: AUTH0_SCHEME });
+    } catch (error) {
+      Alert.alert('Sign-in failed', error instanceof Error ? error.message : 'Unable to sign in. Please try again.');
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const signOut = async () => {
+    setAuthBusy(true);
+    try {
+      await clearSession({}, { customScheme: AUTH0_SCHEME });
+    } catch (error) {
+      Alert.alert('Sign-out failed', error instanceof Error ? error.message : 'Unable to sign out. Please try again.');
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
   const unavailable = (action: string) => Alert.alert(`${action} unavailable in demo`, 'This control is visible now so it can be tested. It will connect to the DataStorm-owned control plane before collection is enabled.');
   const changeMonitoring = async () => {
     if (Platform.OS !== 'android' || !NativeModules.KicksVpn) return unavailable('Monitoring');
@@ -19,6 +47,20 @@ export default function Settings() {
 
   return <Screen>
     <BrandHeader section="Privacy and beta controls" />
+
+    <Text style={ui.eyebrow}>ACCOUNT</Text>
+    <Card accent>
+      <Text style={ui.h2}>{user ? `Signed in${user.name ? ` as ${user.name}` : ''}` : 'Your KICK’S account'}</Text>
+      <Text style={ui.body}>{user?.email ?? 'Sign in securely with your DataStorm identity.'}</Text>
+      {user ? (
+        <Action title={authBusy ? 'Signing out…' : 'Log out'} detail="End your Auth0 session on this device" onPress={signOut} />
+      ) : (
+        <Action title={authBusy || authLoading ? 'Connecting…' : 'Log in / Sign up'} detail="Continue with Auth0 Universal Login" onPress={signIn} />
+      )}
+      {authError ? <Text accessibilityRole="alert" style={s.authError}>{authError.message}</Text> : null}
+      <Text style={s.authNote}>Authentication is separate from device monitoring and does not enable collection.</Text>
+    </Card>
+
     <Text style={ui.eyebrow}>YOUR CONTROLS</Text>
     <Text style={ui.title}>Private by default.</Text>
     <Text style={ui.body}>Monitoring stays off until you review the disclosure and give explicit permission on Android.</Text>
@@ -52,5 +94,5 @@ export default function Settings() {
 }
 
 function SettingRow({title, detail, children}:{title:string;detail:string;children:React.ReactNode}) { return <View style={s.row}><View style={s.flex}><Text style={s.title}>{title}</Text><Text style={s.detail}>{detail}</Text></View>{children}</View>; }
-function Action({title,detail,danger=false,onPress}:{title:string;detail:string;danger?:boolean;onPress:()=>void}) { return <Pressable onPress={onPress}><Card><View style={s.row}><View style={s.flex}><Text style={[s.title,danger&&s.danger]}>{title}</Text><Text style={s.detail}>{detail}</Text></View><Text style={danger?s.danger:s.arrow}>›</Text></View></Card></Pressable>; }
-const s=StyleSheet.create({row:{flexDirection:'row',alignItems:'center',gap:14},flex:{flex:1},title:{color:colors.text,fontSize:16,fontWeight:'800'},detail:{color:colors.muted,fontSize:12,lineHeight:18,marginTop:3},status:{color:colors.orange,fontSize:10,fontWeight:'900',letterSpacing:1,marginTop:5},arrow:{color:colors.blue,fontSize:26},danger:{color:colors.red},link:{color:colors.blue,fontSize:12,fontWeight:'700',marginTop:4}});
+function Action({title,detail,danger=false,onPress}:{title:string;detail:string;danger?:boolean;onPress:()=>void}) { return <Pressable accessibilityRole="button" onPress={onPress}><Card><View style={s.row}><View style={s.flex}><Text style={[s.title,danger&&s.danger]}>{title}</Text><Text style={s.detail}>{detail}</Text></View><Text style={danger?s.danger:s.arrow}>›</Text></View></Card></Pressable>; }
+const s=StyleSheet.create({row:{flexDirection:'row',alignItems:'center',gap:14},flex:{flex:1},title:{color:colors.text,fontSize:16,fontWeight:'800'},detail:{color:colors.muted,fontSize:12,lineHeight:18,marginTop:3},status:{color:colors.orange,fontSize:10,fontWeight:'900',letterSpacing:1,marginTop:5},arrow:{color:colors.blue,fontSize:26},danger:{color:colors.red},link:{color:colors.blue,fontSize:12,fontWeight:'700',marginTop:4},authError:{color:colors.red,fontSize:12},authNote:{color:colors.muted,fontSize:11,lineHeight:16}});
