@@ -6,12 +6,12 @@ import { Pool } from 'pg';
 import { readFile } from 'node:fs/promises';
 import { PostgresStore } from './store.js';
 import { PostgresConsumerIdentityStore } from './consumer-identity-postgres.js';
-import { PostgresConsumerDeviceBindingStore } from './consumer-device-bindings.js';
+import { PostgresConsumerDeviceBindingStore, DeviceBindingRevoked } from './consumer-device-bindings.js';
 import { SessionManager } from '../../../apps/mobile/services/sessionCore.js';
 import { PostgresGatewayLeaseStore } from './ios-gateway-enrollment.js';
 import { PostgresIosDeviceProvisioner } from './ios-device-provisioning.js';
 
-test('PostgreSQL native device provisioning persists retries and atomically rolls back conflicting device binding', { skip: !process.env.KICKS_TEST_DATABASE_URL }, async()=>{
+test('PostgreSQL native device provisioning and reverse lookup persist across reconnect and reject revoked binding', { skip: !process.env.KICKS_TEST_DATABASE_URL }, async()=>{
   const schema='test_ios_provision_'+randomUUID().replaceAll('-','');
   const admin=new Pool({connectionString:process.env.KICKS_TEST_DATABASE_URL});await admin.query('CREATE SCHEMA '+schema);
   const url=new URL(process.env.KICKS_TEST_DATABASE_URL!);url.searchParams.set('options','-c search_path='+schema);
@@ -32,9 +32,21 @@ test('PostgreSQL native device provisioning persists retries and atomically roll
     await assert.rejects(provisioner.provision(changed)); // duplicate public key after device+binding inserts
     assert.equal((await pool.query('SELECT count(*)::int AS n FROM devices')).rows[0].n,1);
     assert.equal((await bindings.list(input.accountSubjectId)).length,1);
+    const expectedBinding=(await bindings.list(input.accountSubjectId))[0]!;
+    assert.equal(await bindings.findActiveByDeviceId('absent-device'),null);
+    const lookupPool=new Pool({connectionString:url.toString()});
+    try {
+      const reconnectedBindings=new PostgresConsumerDeviceBindingStore(lookupPool);
+      const found=await reconnectedBindings.findActiveByDeviceId(input.deviceId);
+      assert.deepEqual(found,expectedBinding);
+      assert.equal(found?.subject_id,input.accountSubjectId);
+      assert.equal(found?.device_id,input.deviceId);
+      assert.equal(found?.collector_subject_id,expectedBinding.collector_subject_id);
+    } finally { await lookupPool.end(); }
     assert.equal((await pool.query('SELECT count(*)::int AS n FROM consent_events')).rows[0].n,0);
     await assert.rejects(provisioner.provision({...input,accountSubjectId:'different-account'}));
     await bindings.revoke(input.accountSubjectId,input.deviceId);
+    await assert.rejects(bindings.findActiveByDeviceId(input.deviceId),DeviceBindingRevoked);
     await assert.rejects(bindings.bind({subjectId:input.accountSubjectId,deviceId:input.deviceId,collectorSubjectId:'replacement',platform:'ios'}));
     await assert.rejects(pool.query("UPDATE consumer_device_bindings SET status='active' WHERE device_id=$1",[input.deviceId]));
     await assert.rejects(pool.query('DELETE FROM consumer_device_bindings WHERE device_id=$1',[input.deviceId]));
