@@ -203,13 +203,14 @@ export class SessionManager {
   private async nativeCollectorSession<T>(operation: (origin: string, bearer: string, subject: string) => Promise<T>): Promise<T> {
     if (!this.user) throw new SessionError('Sign in to enroll this iPad.');
     const epoch = this.epoch;
+    const subject = this.user.subjectId;
     const origin = this.baseUrl();
     if (Date.now() >= this.expiresAt - 30000) await this.refresh(epoch);
-    if (epoch !== this.epoch || !this.user || !this.accessToken || this.baseUrl() !== origin) {
+    if (epoch !== this.epoch || !this.user || this.user.subjectId !== subject || !this.accessToken || this.baseUrl() !== origin) {
       throw new SessionError('Your session changed. Try again.');
     }
-    const result = await operation(origin, this.accessToken, this.user.subjectId);
-    if (epoch !== this.epoch || !this.user || this.baseUrl() !== origin) {
+    const result = await operation(origin, this.accessToken, subject);
+    if (epoch !== this.epoch || !this.user || this.user.subjectId !== subject || this.baseUrl() !== origin) {
       throw new SessionError('Your session changed. Monitoring remains off.');
     }
     return result;
